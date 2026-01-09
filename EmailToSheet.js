@@ -181,20 +181,46 @@ function processDataForSheet(data) {
   
   const headers = data[0];
   const linkColumnIndex = headers.indexOf('Link to SF Opportunity');
-  
-  if (linkColumnIndex === -1) return data;
+  const renewalDateIndex = headers.indexOf('Renewal Date');
+  const renewableIndex = headers.indexOf('Renewable');
+  const forcastIndex = headers.indexOf('Forcast');
+  const amountIndex = headers.indexOf('Amount (gross)');
   
   const processedData = data.map((row, rowIndex) => {
     if (rowIndex === 0) return row;
     
     const newRow = [...row];
-    const cellValue = row[linkColumnIndex];
     
-    if (cellValue && cellValue.includes('<a href')) {
-      const parsed = parseHTMLLink(cellValue);
-      if (parsed) {
-        newRow[linkColumnIndex] = `=HYPERLINK("${parsed.url}", "${parsed.text}")`;
+    if (linkColumnIndex !== -1) {
+      const cellValue = row[linkColumnIndex];
+      if (cellValue && cellValue.includes('<a href')) {
+        const parsed = parseHTMLLink(cellValue);
+        if (parsed) {
+          newRow[linkColumnIndex] = `=HYPERLINK("${parsed.url}", "${parsed.text}")`;
+        }
       }
+    }
+    
+    if (renewalDateIndex !== -1) {
+      const dateValue = row[renewalDateIndex];
+      if (dateValue) {
+        const dateMatch = dateValue.match(/(\d{4}-\d{2}-\d{2})/);
+        if (dateMatch) {
+          newRow[renewalDateIndex] = dateMatch[1];
+        }
+      }
+    }
+    
+    if (renewableIndex !== -1 && row[renewableIndex]) {
+      newRow[renewableIndex] = parseFloat(row[renewableIndex]) || row[renewableIndex];
+    }
+    
+    if (forcastIndex !== -1 && row[forcastIndex]) {
+      newRow[forcastIndex] = parseFloat(row[forcastIndex]) || row[forcastIndex];
+    }
+    
+    if (amountIndex !== -1 && row[amountIndex]) {
+      newRow[amountIndex] = parseFloat(row[amountIndex]) || row[amountIndex];
     }
     
     return newRow;
@@ -247,9 +273,23 @@ function writeToSheet(data, sheetName) {
     
     sheet.setFrozenRows(1);
     
+    const renewableIndex = headers.indexOf('Renewable');
+    const forcastIndex = headers.indexOf('Forcast');
+    const amountIndex = headers.indexOf('Amount (gross)');
+    
     if (processedData.length > 1) {
-      sheet.getRange(2, 1, processedData.length - 1, processedData[0].length)
-        .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY);
+      if (renewableIndex !== -1) {
+        sheet.getRange(2, renewableIndex + 1, processedData.length - 1, 1)
+          .setNumberFormat('$#,##0.00');
+      }
+      if (forcastIndex !== -1) {
+        sheet.getRange(2, forcastIndex + 1, processedData.length - 1, 1)
+          .setNumberFormat('$#,##0.00');
+      }
+      if (amountIndex !== -1) {
+        sheet.getRange(2, amountIndex + 1, processedData.length - 1, 1)
+          .setNumberFormat('$#,##0.00');
+      }
     }
   }
   
