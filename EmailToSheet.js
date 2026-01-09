@@ -103,12 +103,22 @@ function findAndExtractLatestCSV(config) {
 function parseCSV(csvContent) {
   const lines = csvContent.split(/\r?\n/);
   const result = [];
+  let healthColumnIndex = -1;
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (line.length === 0) continue;
     
     const row = parseCSVLine(line);
+    
+    if (i === 0) {
+      healthColumnIndex = row.indexOf('Health');
+    }
+    
+    if (healthColumnIndex !== -1) {
+      row.splice(healthColumnIndex, 1);
+    }
+    
     result.push(row);
   }
   
@@ -147,6 +157,53 @@ function parseCSVLine(line) {
 }
 
 /**
+ * Parse HTML link and extract text and URL
+ */
+function parseHTMLLink(htmlString) {
+  const hrefMatch = htmlString.match(/href="([^"]+)"/);
+  const textMatch = htmlString.match(/>([^<]+)<\/a>/);
+  
+  if (hrefMatch && textMatch) {
+    return {
+      url: hrefMatch[1],
+      text: textMatch[1]
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * Process data to convert HTML links to Google Sheets formulas
+ */
+function processDataForSheet(data) {
+  if (data.length === 0) return data;
+  
+  const headers = data[0];
+  const linkColumnIndex = headers.indexOf('Link to SF Opportunity');
+  
+  if (linkColumnIndex === -1) return data;
+  
+  const processedData = data.map((row, rowIndex) => {
+    if (rowIndex === 0) return row;
+    
+    const newRow = [...row];
+    const cellValue = row[linkColumnIndex];
+    
+    if (cellValue && cellValue.includes('<a href')) {
+      const parsed = parseHTMLLink(cellValue);
+      if (parsed) {
+        newRow[linkColumnIndex] = `=HYPERLINK("${parsed.url}", "${parsed.text}")`;
+      }
+    }
+    
+    return newRow;
+  });
+  
+  return processedData;
+}
+
+/**
  * Write data to Google Sheet
  */
 function writeToSheet(data, sheetName) {
@@ -160,28 +217,44 @@ function writeToSheet(data, sheetName) {
   sheet.clear();
   
   if (data.length > 0) {
-    sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+    const processedData = processDataForSheet(data);
     
-    sheet.getRange(1, 1, 1, data[0].length)
+    const headers = processedData[0];
+    const linkColumnIndex = headers.indexOf('Link to SF Opportunity');
+    
+    for (let i = 0; i < processedData.length; i++) {
+      for (let j = 0; j < processedData[i].length; j++) {
+        const cellValue = processedData[i][j];
+        const cell = sheet.getRange(i + 1, j + 1);
+        
+        if (i > 0 && j === linkColumnIndex && cellValue && cellValue.startsWith('=HYPERLINK')) {
+          cell.setFormula(cellValue);
+        } else {
+          cell.setValue(cellValue);
+        }
+      }
+    }
+    
+    sheet.getRange(1, 1, 1, processedData[0].length)
       .setFontWeight('bold')
       .setBackground('#4285f4')
       .setFontColor('#ffffff');
     
-    for (let i = 1; i <= data[0].length; i++) {
+    for (let i = 1; i <= processedData[0].length; i++) {
       sheet.autoResizeColumn(i);
     }
     
     sheet.setFrozenRows(1);
     
-    if (data.length > 1) {
-      sheet.getRange(2, 1, data.length - 1, data[0].length)
+    if (processedData.length > 1) {
+      sheet.getRange(2, 1, processedData.length - 1, processedData[0].length)
         .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY);
     }
   }
   
   const timestamp = new Date();
-  sheet.getRange(1, data[0].length + 2).setValue('Last Updated:');
-  sheet.getRange(1, data[0].length + 3).setValue(timestamp);
+  sheet.getRange(1, processedData[0].length + 2).setValue('Last Updated:');
+  sheet.getRange(1, processedData[0].length + 3).setValue(timestamp);
   
   Logger.log(`Wrote ${data.length} rows to sheet "${sheetName}"`);
 }
