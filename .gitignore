@@ -1,0 +1,12 @@
+# Clasp
+.clasp.json
+.claspignore
+
+# macOS
+.DS_Store
+
+# Sample data
+*.csv
+
+# Logs
+*.log
