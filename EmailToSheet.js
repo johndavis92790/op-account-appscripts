@@ -360,14 +360,16 @@ function setupAutoImport() {
   
   ScriptApp.newTrigger('importLatestCSV')
     .timeBased()
-    .everyHours(1)
+    .atHour(2)
+    .everyDays(1)
+    .inTimezone('America/Denver')
     .create();
   
-  Logger.log('Auto-import trigger created (runs every hour)');
+  Logger.log('Auto-import trigger created (runs daily at 2am MST)');
   
   SpreadsheetApp.getUi().alert(
     'Auto-Import Enabled',
-    'CSV will now be imported automatically every hour.\n\nTo change frequency, edit the setupAutoImport() function.',
+    'CSV will now be imported automatically every day at 2am MST.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }
