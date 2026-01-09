@@ -216,8 +216,9 @@ function writeToSheet(data, sheetName) {
   
   sheet.clear();
   
+  const processedData = processDataForSheet(data);
+  
   if (data.length > 0) {
-    const processedData = processDataForSheet(data);
     
     const headers = processedData[0];
     const linkColumnIndex = headers.indexOf('Link to SF Opportunity');
