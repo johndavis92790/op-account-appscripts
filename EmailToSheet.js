@@ -276,6 +276,8 @@ function writeToSheet(data, sheetName) {
     const renewableIndex = headers.indexOf('Renewable');
     const forcastIndex = headers.indexOf('Forcast');
     const amountIndex = headers.indexOf('Amount (gross)');
+    const auditUsageIndex = headers.indexOf('Audit Usage');
+    const journeyUsageIndex = headers.indexOf('Journey Usage');
     
     if (processedData.length > 1) {
       if (renewableIndex !== -1) {
@@ -289,6 +291,14 @@ function writeToSheet(data, sheetName) {
       if (amountIndex !== -1) {
         sheet.getRange(2, amountIndex + 1, processedData.length - 1, 1)
           .setNumberFormat('$#,##0.00');
+      }
+      if (auditUsageIndex !== -1) {
+        sheet.getRange(2, auditUsageIndex + 1, processedData.length - 1, 1)
+          .setNumberFormat('0.00%');
+      }
+      if (journeyUsageIndex !== -1) {
+        sheet.getRange(2, journeyUsageIndex + 1, processedData.length - 1, 1)
+          .setNumberFormat('0.00%');
       }
     }
   }
