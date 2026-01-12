@@ -14,7 +14,7 @@ function onOpen() {
   
   ui.createMenu('Calendar Import')
     .addItem('Import Calendar Events', 'importCalendarEvents')
-    .addItem('Setup Auto-Import (15 min)', 'setupCalendarAutoImport')
+    .addItem('Setup Auto-Import (30 min)', 'setupCalendarAutoImport')
     .addItem('Test Calendar Import', 'testCalendarImport')
     .addToUi();
   
