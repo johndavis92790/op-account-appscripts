@@ -196,11 +196,18 @@ function buildGmailSearchQuery(domains, lastSyncDate) {
 
 /**
  * Get email domain from an email address
+ * Handles formats like: "Name <email@domain.com>", "email@domain.com", etc.
  */
 function getEmailDomain(email) {
   if (!email || typeof email !== 'string') return '';
-  const match = email.match(/@(.+?)(?:>|$)/);
-  return match ? match[1].toLowerCase() : '';
+  
+  const emailMatch = email.match(/<([^>]+@[^>]+)>|([^\s<>]+@[^\s<>,]+)/);
+  if (!emailMatch) return '';
+  
+  const emailAddress = emailMatch[1] || emailMatch[2];
+  const domainMatch = emailAddress.match(/@([^>\s,]+)/);
+  
+  return domainMatch ? domainMatch[1].toLowerCase().trim() : '';
 }
 
 /**
