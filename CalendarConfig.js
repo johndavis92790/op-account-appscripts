@@ -6,6 +6,19 @@ const CALENDAR_CONFIG = {
   calendarId: 'primary',
   
   sheetName: 'Calendar Events',
+  
+  excludedTitles: [
+    'CEO Update ObservePoint',
+    'ObservePoint Company Lunch',
+    'OP Pickleball Club',
+    'John Pestana\'s birthday',
+    'CS Team Sync',
+    'Customer Success | QBR',
+    'Out of office',
+    'Home',
+    'Pleasant Grove Suite 300 (Office)',
+    'Time Allocations'
+  ]
 };
 
 function getCalendarImportConfig() {

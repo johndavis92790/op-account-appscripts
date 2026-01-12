@@ -59,7 +59,15 @@ function fetchCalendarEvents(config) {
   
   const events = calendar.getEvents(startDate, endDate);
   
-  return events.map(event => {
+  const excludedTitles = config.excludedTitles || [];
+  const filteredEvents = events.filter(event => {
+    const title = event.getTitle();
+    return !excludedTitles.includes(title);
+  });
+  
+  Logger.log(`Filtered ${events.length} events down to ${filteredEvents.length} (excluded ${events.length - filteredEvents.length})`);
+  
+  return filteredEvents.map(event => {
     const guests = event.getGuestList();
     
     return {
