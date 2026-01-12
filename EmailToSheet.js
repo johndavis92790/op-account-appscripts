@@ -17,6 +17,10 @@ function onOpen() {
     .addItem('Setup Auto-Import (15 min)', 'setupCalendarAutoImport')
     .addItem('Test Calendar Import', 'testCalendarImport')
     .addToUi();
+  
+  ui.createMenu('Opportunity Mapping')
+    .addItem('Initialize/Refresh Mapping', 'initializeOpportunityMapping')
+    .addToUi();
 }
 
 /**
@@ -42,6 +46,9 @@ function importLatestCSV() {
     
     Logger.log('Step 3: Writing to sheet...');
     writeToSheet(parsedData, config.sheetName);
+    
+    Logger.log('Step 4: Updating opportunity mapping...');
+    updateOpportunityMapping();
     
     const duration = (new Date() - startTime) / 1000;
     Logger.log(`=== Import Complete in ${duration}s ===`);
