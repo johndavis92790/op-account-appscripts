@@ -11,6 +11,12 @@ function onOpen() {
     .addItem('Setup Auto-Import', 'setupAutoImport')
     .addItem('Test Email Search', 'testEmailSearch')
     .addToUi();
+  
+  ui.createMenu('Calendar Import')
+    .addItem('Import Calendar Events', 'importCalendarEvents')
+    .addItem('Setup Auto-Import (15 min)', 'setupCalendarAutoImport')
+    .addItem('Test Calendar Import', 'testCalendarImport')
+    .addToUi();
 }
 
 /**
