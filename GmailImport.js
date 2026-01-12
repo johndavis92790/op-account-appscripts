@@ -201,11 +201,14 @@ function buildGmailSearchQuery(domains, lastSyncDate) {
 function getEmailDomain(email) {
   if (!email || typeof email !== 'string') return '';
   
-  const emailMatch = email.match(/<([^>]+@[^>]+)>|([^\s<>]+@[^\s<>,]+)/);
+  // Extract email from angle brackets or standalone
+  const emailMatch = email.match(/<([^>]+@[^>]+)>|([^\s<>"]+@[^\s<>",]+)/);
   if (!emailMatch) return '';
   
   const emailAddress = emailMatch[1] || emailMatch[2];
-  const domainMatch = emailAddress.match(/@([^>\s,]+)/);
+  
+  // Extract domain, excluding quotes and other special chars
+  const domainMatch = emailAddress.match(/@([a-zA-Z0-9.-]+)/);
   
   return domainMatch ? domainMatch[1].toLowerCase().trim() : '';
 }
