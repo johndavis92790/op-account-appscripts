@@ -21,6 +21,12 @@ function onOpen() {
   ui.createMenu('Opportunity Mapping')
     .addItem('Initialize/Refresh Mapping', 'initializeOpportunityMapping')
     .addToUi();
+  
+  ui.createMenu('Email Communications')
+    .addItem('Import Emails by Domain', 'importEmailsByDomainManual')
+    .addItem('Setup Auto-Import (30 min)', 'setupEmailAutoImport')
+    .addItem('Reset Sync State', 'resetEmailSyncState')
+    .addToUi();
 }
 
 /**
