@@ -7,7 +7,7 @@
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('Email Import')
-    .addItem('Import Latest CSV', 'importLatestCSV')
+    .addItem('Import Latest CSV', 'importLatestCSVManual')
     .addItem('Setup Auto-Import', 'setupAutoImport')
     .addItem('Test Email Search', 'testEmailSearch')
     .addToUi();
@@ -46,21 +46,10 @@ function importLatestCSV() {
     const duration = (new Date() - startTime) / 1000;
     Logger.log(`=== Import Complete in ${duration}s ===`);
     
-    SpreadsheetApp.getUi().alert(
-      'Import Complete',
-      `Successfully imported ${parsedData.length} rows from CSV.\n\nDuration: ${duration}s`,
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    
   } catch (error) {
     Logger.log('ERROR: ' + error.message);
     Logger.log(error.stack);
-    
-    SpreadsheetApp.getUi().alert(
-      'Import Failed',
-      'Error: ' + error.message + '\n\nCheck the logs for details.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
+    throw error;
   }
 }
 
