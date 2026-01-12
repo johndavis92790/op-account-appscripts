@@ -67,15 +67,18 @@ function fetchCalendarEvents(config) {
       title: event.getTitle(),
       startTime: event.getStartTime(),
       endTime: event.getEndTime(),
-      location: event.getLocation(),
-      description: event.getDescription(),
+      location: event.getLocation() || '',
+      description: event.getDescription() || '',
       isAllDay: event.isAllDayEvent(),
-      attendees: guests.map(guest => ({
-        email: guest.getEmail(),
-        name: guest.getName(),
-        status: guest.getGuestStatus().toString()
-      })),
-      myStatus: event.getMyStatus().toString(),
+      attendees: guests.map(guest => {
+        const guestStatus = guest.getGuestStatus();
+        return {
+          email: guest.getEmail() || '',
+          name: guest.getName() || '',
+          status: guestStatus ? guestStatus.toString() : 'UNKNOWN'
+        };
+      }),
+      myStatus: event.getMyStatus() ? event.getMyStatus().toString() : 'UNKNOWN',
       creator: event.getCreators()[0] || '',
       isRecurring: event.isRecurringEvent()
     };
