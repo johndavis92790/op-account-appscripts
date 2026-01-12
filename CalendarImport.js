@@ -209,7 +209,7 @@ function writeCalendarToSheet(data, sheetName) {
 }
 
 /**
- * Setup automatic import trigger (every 30 minutes)
+ * Setup automatic import trigger (every 15 minutes)
  */
 function setupCalendarAutoImport() {
   const triggers = ScriptApp.getProjectTriggers();
@@ -221,14 +221,14 @@ function setupCalendarAutoImport() {
   
   ScriptApp.newTrigger('importCalendarEvents')
     .timeBased()
-    .everyMinutes(30)
+    .everyMinutes(15)
     .create();
   
-  Logger.log('Calendar auto-import trigger created (runs every 30 minutes)');
+  Logger.log('Calendar auto-import trigger created (runs every 15 minutes)');
   
   SpreadsheetApp.getUi().alert(
     'Calendar Auto-Import Enabled',
-    'Calendar events will now be imported automatically every 30 minutes.',
+    'Calendar events will now be imported automatically every 15 minutes.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }

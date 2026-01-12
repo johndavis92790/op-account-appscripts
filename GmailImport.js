@@ -351,7 +351,7 @@ function importEmailsByDomainManual() {
 }
 
 /**
- * Setup automatic email import trigger (every 30 minutes)
+ * Setup automatic email import trigger (every 15 minutes)
  */
 function setupEmailAutoImport() {
   const triggers = ScriptApp.getProjectTriggers();
@@ -363,14 +363,14 @@ function setupEmailAutoImport() {
   
   ScriptApp.newTrigger('importEmailsByDomain')
     .timeBased()
-    .everyMinutes(30)
+    .everyMinutes(15)
     .create();
   
-  Logger.log('Email auto-import trigger created (runs every 30 minutes)');
+  Logger.log('Email auto-import trigger created (runs every 15 minutes)');
   
   SpreadsheetApp.getUi().alert(
     'Email Auto-Import Enabled',
-    'Emails will now be imported automatically every 30 minutes.\n\nOnly new emails since the last sync will be imported.',
+    'Emails will now be imported automatically every 15 minutes.\n\nOnly new emails since the last sync will be imported.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }
