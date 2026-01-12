@@ -112,11 +112,21 @@ function updateOpportunityMapping() {
 
 /**
  * Get email domain from an email address
+ * Handles formats like: "Name <email@domain.com>", "email@domain.com", etc.
  */
 function getEmailDomain(email) {
   if (!email || typeof email !== 'string') return '';
-  const match = email.match(/@(.+)$/);
-  return match ? match[1].toLowerCase() : '';
+  
+  // Extract email from angle brackets or standalone
+  const emailMatch = email.match(/<([^>]+@[^>]+)>|([^\s<>"]+@[^\s<>",]+)/);
+  if (!emailMatch) return '';
+  
+  const emailAddress = emailMatch[1] || emailMatch[2];
+  
+  // Extract domain, excluding quotes and other special chars
+  const domainMatch = emailAddress.match(/@([a-zA-Z0-9.-]+)/);
+  
+  return domainMatch ? domainMatch[1].toLowerCase().trim() : '';
 }
 
 /**

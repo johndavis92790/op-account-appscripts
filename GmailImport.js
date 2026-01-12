@@ -237,9 +237,24 @@ function extractEmailData(message) {
   const uniqueCcDomains = [...new Set(ccDomainsArray)];
   const ccDomains = uniqueCcDomains.join(', ');
   
-  const opportunity = findOpportunityByEmail(from) || 
-                     findOpportunityByEmail(to) || 
-                     (cc ? findOpportunityByEmail(cc) : null);
+  // Find opportunity by checking from, then all to addresses, then all cc addresses
+  let opportunity = findOpportunityByEmail(from);
+  
+  if (!opportunity && to) {
+    const toEmails = to.split(',').map(e => e.trim());
+    for (const email of toEmails) {
+      opportunity = findOpportunityByEmail(email);
+      if (opportunity) break;
+    }
+  }
+  
+  if (!opportunity && cc) {
+    const ccEmails = cc.split(',').map(e => e.trim());
+    for (const email of ccEmails) {
+      opportunity = findOpportunityByEmail(email);
+      if (opportunity) break;
+    }
+  }
   
   return {
     messageId: messageId,
