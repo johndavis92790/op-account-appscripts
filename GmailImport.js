@@ -195,6 +195,15 @@ function buildGmailSearchQuery(domains, lastSyncDate) {
 }
 
 /**
+ * Get email domain from an email address
+ */
+function getEmailDomain(email) {
+  if (!email || typeof email !== 'string') return '';
+  const match = email.match(/@(.+?)(?:>|$)/);
+  return match ? match[1].toLowerCase() : '';
+}
+
+/**
  * Extract relevant data from email message
  */
 function extractEmailData(message) {
