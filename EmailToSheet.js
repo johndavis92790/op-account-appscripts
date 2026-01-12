@@ -6,26 +6,21 @@
 
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  ui.createMenu('Email Import')
-    .addItem('Import Latest CSV', 'importLatestCSVManual')
-    .addItem('Setup Auto-Import', 'setupAutoImport')
-    .addItem('Test Email Search', 'testEmailSearch')
-    .addToUi();
-  
-  ui.createMenu('Calendar Import')
-    .addItem('Import Calendar Events', 'importCalendarEvents')
-    .addItem('Setup Auto-Import (30 min)', 'setupCalendarAutoImport')
-    .addItem('Test Calendar Import', 'testCalendarImport')
-    .addToUi();
-  
-  ui.createMenu('Opportunity Mapping')
-    .addItem('Initialize/Refresh Mapping', 'initializeOpportunityMapping')
-    .addToUi();
-  
-  ui.createMenu('Email Communications')
-    .addItem('Import Emails by Domain', 'importEmailsByDomainManual')
-    .addItem('Setup Auto-Import (30 min)', 'setupEmailAutoImport')
-    .addItem('Reset Sync State', 'resetEmailSyncState')
+  ui.createMenu('OP Account Tools')
+    .addSubMenu(ui.createMenu('Email Import')
+      .addItem('Import Latest CSV', 'importLatestCSVManual')
+      .addItem('Setup Auto-Import', 'setupAutoImport')
+      .addItem('Test Email Search', 'testEmailSearch'))
+    .addSubMenu(ui.createMenu('Calendar Import')
+      .addItem('Import Calendar Events', 'importCalendarEvents')
+      .addItem('Setup Auto-Import (30 min)', 'setupCalendarAutoImport')
+      .addItem('Test Calendar Import', 'testCalendarImport'))
+    .addSubMenu(ui.createMenu('Opportunity Mapping')
+      .addItem('Initialize/Refresh Mapping', 'initializeOpportunityMapping'))
+    .addSubMenu(ui.createMenu('Email Communications')
+      .addItem('Import Emails by Domain', 'importEmailsByDomainManual')
+      .addItem('Setup Auto-Import (30 min)', 'setupEmailAutoImport')
+      .addItem('Reset Sync State', 'resetEmailSyncState'))
     .addToUi();
 }
 
