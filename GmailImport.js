@@ -226,8 +226,16 @@ function extractEmailData(message) {
   const messageId = message.getId();
   
   const fromDomain = getEmailDomain(from);
-  const toDomains = to.split(',').map(e => getEmailDomain(e.trim())).filter(d => d).join(', ');
-  const ccDomains = cc ? cc.split(',').map(e => getEmailDomain(e.trim())).filter(d => d).join(', ') : '';
+  
+  // Extract and deduplicate To domains
+  const toDomainsArray = to.split(',').map(e => getEmailDomain(e.trim())).filter(d => d);
+  const uniqueToDomains = [...new Set(toDomainsArray)];
+  const toDomains = uniqueToDomains.join(', ');
+  
+  // Extract and deduplicate CC domains
+  const ccDomainsArray = cc ? cc.split(',').map(e => getEmailDomain(e.trim())).filter(d => d) : [];
+  const uniqueCcDomains = [...new Set(ccDomainsArray)];
+  const ccDomains = uniqueCcDomains.join(', ');
   
   const opportunity = findOpportunityByEmail(from) || 
                      findOpportunityByEmail(to) || 
