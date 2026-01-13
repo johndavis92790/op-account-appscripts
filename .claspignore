@@ -1,0 +1,10 @@
+# Test files - don't upload to Apps Script
+test-*.js
+*.test.js
+**/*test*.js
+
+# Documentation
+*.md
+
+# Sample data
+*.csv
