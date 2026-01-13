@@ -5,7 +5,7 @@
  */
 
 const EMAIL_CONFIG = {
-  emailSearchQuery: 'subject:"Renewal Opportunities" has:attachment filename:csv newer_than:7d',
+  emailSearchQuery: 'subject:"Report - Master - Renewal Opportunities" has:attachment filename:csv newer_than:1d',
   
   sheetName: 'Renewal Opportunities',
   

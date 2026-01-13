@@ -17,7 +17,11 @@ const CALENDAR_CONFIG = {
     'Out of office',
     'Home',
     'Pleasant Grove Suite 300 (Office)',
-    'Time Allocations'
+    'Time Allocations',
+    'AE SyncUp - Andy Compas',
+    'Key Results & Renewal Forecast',
+    'John/Todd - account sync',
+    'Dallin / John Accounts Sync'
   ]
 };
 
