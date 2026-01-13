@@ -116,7 +116,8 @@ function processCalendarEvents(events) {
     'Accepted Count',
     'Declined Count',
     'Tentative Count',
-    'No Response Count'
+    'No Response Count',
+    'Opportunity'
   ];
   
   const rows = events.map(event => {
@@ -130,6 +131,26 @@ function processCalendarEvents(events) {
     const declinedCount = event.attendees.filter(a => a.status === 'NO').length;
     const tentativeCount = event.attendees.filter(a => a.status === 'MAYBE').length;
     const noResponseCount = event.attendees.filter(a => a.status === 'INVITED' || a.status === 'AWAITING').length;
+    
+    // Find opportunity by checking all attendee emails
+    // Prioritize external domains (non-observepoint.com) for better customer mapping
+    let opportunity = '';
+    const externalAttendees = event.attendees.filter(a => a.email && !a.email.toLowerCase().includes('@observepoint.com'));
+    const internalAttendees = event.attendees.filter(a => a.email && a.email.toLowerCase().includes('@observepoint.com'));
+    
+    // Check external attendees first
+    for (const attendee of externalAttendees) {
+      opportunity = findOpportunityByEmail(attendee.email);
+      if (opportunity) break;
+    }
+    
+    // If no external match, check internal attendees
+    if (!opportunity) {
+      for (const attendee of internalAttendees) {
+        opportunity = findOpportunityByEmail(attendee.email);
+        if (opportunity) break;
+      }
+    }
     
     return [
       event.id,
@@ -150,7 +171,8 @@ function processCalendarEvents(events) {
       acceptedCount,
       declinedCount,
       tentativeCount,
-      noResponseCount
+      noResponseCount,
+      opportunity || ''
     ];
   });
   
