@@ -13,7 +13,8 @@ function onOpen() {
   
   const configs = getEmailConfigs();
   configs.forEach(config => {
-    emailImportMenu.addItem(`Import: ${config.name}`, `importCSV_${config.id}`);
+    const camelCaseId = config.id.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase());
+    emailImportMenu.addItem(`Import: ${config.name}`, `importCSV_${camelCaseId}`);
   });
   
   emailImportMenu
@@ -48,6 +49,14 @@ function onOpen() {
 function importCSV_renewalOpportunities() {
   return importLatestCSVManual('renewal-opportunities');
 }
+function importCSV_opptysReport() {
+  return importLatestCSVManual('opptys-report');
+}
+
+function importCSV_accountsCard() {
+  return importLatestCSVManual('accounts-card');
+}
+
 
 /**
  * Main function - Import latest CSV from email
@@ -320,15 +329,15 @@ function writeToSheet(data, sheetName) {
     const headers = processedData[0];
     const linkColumnIndex = headers.indexOf('Link to SF Opportunity');
     
-    for (let i = 0; i < processedData.length; i++) {
-      for (let j = 0; j < processedData[i].length; j++) {
-        const cellValue = processedData[i][j];
-        const cell = sheet.getRange(i + 1, j + 1);
-        
-        if (i > 0 && j === linkColumnIndex && cellValue && cellValue.startsWith('=HYPERLINK')) {
-          cell.setFormula(cellValue);
-        } else {
-          cell.setValue(cellValue);
+    // Write all data at once (much faster than cell-by-cell)
+    sheet.getRange(1, 1, processedData.length, processedData[0].length).setValues(processedData);
+    
+    // Handle formulas separately (only for HYPERLINK cells)
+    if (linkColumnIndex !== -1) {
+      for (let i = 1; i < processedData.length; i++) {
+        const cellValue = processedData[i][linkColumnIndex];
+        if (cellValue && typeof cellValue === 'string' && cellValue.startsWith('=HYPERLINK')) {
+          sheet.getRange(i + 1, linkColumnIndex + 1).setFormula(cellValue);
         }
       }
     }
