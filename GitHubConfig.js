@@ -55,6 +55,36 @@ function setGitHubToken(token) {
 }
 
 /**
+ * Prompt user to set GitHub token via UI
+ */
+function setGitHubTokenPrompt() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    'Set GitHub Token',
+    'Enter your GitHub Personal Access Token:\n\n' +
+    '(Create at: https://github.com/settings/tokens)\n' +
+    'Required permissions: Issues + Metadata',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response.getSelectedButton() === ui.Button.OK) {
+    const token = response.getResponseText().trim();
+    if (token) {
+      setGitHubToken(token);
+    } else {
+      ui.alert('Error', 'Token cannot be empty.', ui.ButtonSet.OK);
+    }
+  }
+}
+
+/**
+ * Setup auto-import with 5 minute interval (menu wrapper)
+ */
+function setupGitHubAutoImport5Min() {
+  setupGitHubAutoImport(5);
+}
+
+/**
  * Remove GitHub token from Script Properties
  */
 function removeGitHubToken() {
