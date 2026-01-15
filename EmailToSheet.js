@@ -6,11 +6,23 @@
 
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
+  
+  const emailImportMenu = ui.createMenu('Email Import')
+    .addItem('📥 Import All CSVs', 'importAllCSVsManual')
+    .addSeparator();
+  
+  const configs = getEmailConfigs();
+  configs.forEach(config => {
+    emailImportMenu.addItem(`Import: ${config.name}`, `importCSV_${config.id}`);
+  });
+  
+  emailImportMenu
+    .addSeparator()
+    .addItem('Setup Auto-Import', 'setupAutoImport')
+    .addItem('Test Email Search', 'testEmailSearch');
+  
   ui.createMenu('OP Account Tools')
-    .addSubMenu(ui.createMenu('Email Import')
-      .addItem('Import Latest CSV', 'importLatestCSVManual')
-      .addItem('Setup Auto-Import', 'setupAutoImport')
-      .addItem('Test Email Search', 'testEmailSearch'))
+    .addSubMenu(emailImportMenu)
     .addSubMenu(ui.createMenu('Calendar Import')
       .addItem('Import Calendar Events', 'importCalendarEvents')
       .addItem('Setup Auto-Import (15 min)', 'setupCalendarAutoImport')
@@ -31,20 +43,29 @@ function onOpen() {
 }
 
 /**
- * Main function - Import latest CSV from email
+ * Dynamic menu handlers for each CSV config
  */
-function importLatestCSV() {
+function importCSV_renewalOpportunities() {
+  return importLatestCSVManual('renewal-opportunities');
+}
+
+/**
+ * Main function - Import latest CSV from email
+ * @param {string} configId - Optional config ID to import specific CSV
+ */
+function importLatestCSV(configId) {
   const startTime = new Date();
   Logger.log('=== Starting CSV Import from Email ===');
   
   try {
-    const config = getEmailConfig();
+    const config = getEmailConfig(configId);
+    Logger.log(`Importing: ${config.name}`);
     
     Logger.log('Step 1: Searching for emails...');
     const csvData = findAndExtractLatestCSV(config);
     
     if (!csvData) {
-      throw new Error('No CSV attachment found in recent emails');
+      throw new Error(`No CSV attachment found for: ${config.name}`);
     }
     
     Logger.log('Step 2: Parsing CSV data...');
@@ -60,11 +81,52 @@ function importLatestCSV() {
     const duration = (new Date() - startTime) / 1000;
     Logger.log(`=== Import Complete in ${duration}s ===`);
     
+    return {
+      success: true,
+      configName: config.name,
+      rowCount: parsedData.length,
+      duration: duration
+    };
+    
   } catch (error) {
     Logger.log('ERROR: ' + error.message);
     Logger.log(error.stack);
     throw error;
   }
+}
+
+/**
+ * Import all configured CSV files
+ */
+function importAllCSVs() {
+  const startTime = new Date();
+  Logger.log('=== Starting Import of All CSV Configs ===');
+  
+  const configs = getEmailConfigs();
+  const results = [];
+  
+  for (const config of configs) {
+    try {
+      Logger.log(`\n--- Importing: ${config.name} ---`);
+      const result = importLatestCSV(config.id);
+      results.push(result);
+    } catch (error) {
+      Logger.log(`Failed to import ${config.name}: ${error.message}`);
+      results.push({
+        success: false,
+        configName: config.name,
+        error: error.message
+      });
+    }
+  }
+  
+  const duration = (new Date() - startTime) / 1000;
+  Logger.log(`\n=== All Imports Complete in ${duration}s ===`);
+  
+  const successCount = results.filter(r => r.success).length;
+  Logger.log(`Success: ${successCount}/${results.length}`);
+  
+  return results;
 }
 
 /**
