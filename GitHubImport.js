@@ -3,6 +3,8 @@
  * 
  * Imports tasks from GitHub Projects V2 using GraphQL API
  * Optimized for minimal API calls and fast sheet operations
+ * 
+ * Updated: Now uses account-centric model via labels (account:AccountName)
  */
 
 /**
@@ -324,6 +326,8 @@ function processGitHubTasks(projectData) {
     'URL',
     'Assignees',
     'Labels',
+    'Account ID',
+    'Account Name',
     'Created At',
     'Updated At',
     'Closed At',
@@ -335,6 +339,10 @@ function processGitHubTasks(projectData) {
       .filter(key => key.toLowerCase() !== 'status' && key.toLowerCase() !== 'priority')
       .map(key => `${key}: ${item.customFields[key]}`)
       .join('; ');
+    
+    // Find account from labels (account:AccountName format)
+    const accountName = getAccountFromGitHubLabels(item.labels);
+    const accountInfo = accountName ? getAccountInfoByName(accountName) : null;
     
     return [
       item.id,
@@ -348,6 +356,8 @@ function processGitHubTasks(projectData) {
       item.url,
       item.assignees.join(', '),
       item.labels.join(', '),
+      accountInfo ? accountInfo.accountId : '',
+      accountName || '',
       item.createdAt || '',
       item.updatedAt || '',
       item.closedAt || '',
@@ -379,9 +389,9 @@ function writeGitHubToSheet(data, sheetName) {
       .setBackground('#4078c0')
       .setFontColor('#ffffff');
     
-    const createdCol = 12;
-    const updatedCol = 13;
-    const closedCol = 14;
+    const createdCol = 14;
+    const updatedCol = 15;
+    const closedCol = 16;
     if (data.length > 1) {
       sheet.getRange(2, createdCol, data.length - 1, 1)
         .setNumberFormat('yyyy-mm-dd hh:mm');

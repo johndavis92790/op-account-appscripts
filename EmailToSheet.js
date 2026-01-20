@@ -33,9 +33,10 @@ function onOpen() {
       .addItem('Import Tasks Now', 'importGitHubTasks')
       .addItem('Setup Auto-Import (5 min)', 'setupGitHubAutoImport5Min')
       .addItem('Remove Auto-Import', 'removeGitHubAutoImport')
+      .addItem('Sync Account Labels to GitHub', 'syncAccountLabelsToGitHub')
       .addItem('Test Import', 'testGitHubImport'))
-    .addSubMenu(ui.createMenu('Opportunity Mapping')
-      .addItem('Initialize/Refresh Mapping', 'initializeOpportunityMapping'))
+    .addSubMenu(ui.createMenu('Account Mapping')
+      .addItem('Initialize/Refresh Account Mapping', 'initializeAccountMapping'))
     .addSubMenu(ui.createMenu('Email Communications')
       .addItem('Import Emails by Domain', 'importEmailsByDomainManual')
       .addItem('Setup Auto-Import (15 min)', 'setupEmailAutoImport')
@@ -84,8 +85,8 @@ function importLatestCSV(configId) {
     Logger.log('Step 3: Writing to sheet...');
     writeToSheet(parsedData, config.sheetName);
     
-    Logger.log('Step 4: Updating opportunity mapping...');
-    updateOpportunityMapping();
+    Logger.log('Step 4: Updating account mapping...');
+    updateAccountMapping();
     
     const duration = (new Date() - startTime) / 1000;
     Logger.log(`=== Import Complete in ${duration}s ===`);

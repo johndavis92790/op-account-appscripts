@@ -1,29 +1,31 @@
 /**
  * Gmail Import - Efficient Email Collection by Domain
  * 
- * Imports emails filtered by domains from the Opportunity Mapping sheet
+ * Imports emails filtered by domains from the Account Mapping sheet
  * Uses incremental sync to avoid re-importing emails
  * Optimized for minimal API calls and efficient data storage
+ * 
+ * Updated: Now uses account-centric model (AccountMapping.js)
  */
 
 const EMAIL_SHEET_NAME = 'Email Communications';
 const EMAIL_SYNC_STATE_SHEET = 'Email Sync State';
 
 /**
- * Main function - Import emails filtered by opportunity domains
+ * Main function - Import emails filtered by account domains
  */
 function importEmailsByDomain() {
   const startTime = new Date();
   Logger.log('=== Starting Email Import by Domain ===');
   
   try {
-    const domains = getOpportunityDomains();
+    const domains = getAccountDomains();
     
     if (domains.length === 0) {
       Logger.log('No domains found in mapping sheet');
       return {
         success: false,
-        message: 'No domains configured in Opportunity Mapping sheet'
+        message: 'No domains configured in Account Mapping sheet'
       };
     }
     
@@ -57,14 +59,16 @@ function importEmailsByDomain() {
 }
 
 /**
- * Get all unique domains from the Opportunity Mapping sheet
+ * Get all unique domains from the Account Mapping sheet
  */
-function getOpportunityDomains() {
+function getAccountDomains() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const mappingSheet = spreadsheet.getSheetByName('Opportunities to Email Domains Mapping');
+  
+  const mappingSheet = spreadsheet.getSheetByName('Accounts to Email Domains Mapping');
+  const domainsColIndex = 2; // Column C (0-indexed = 2)
   
   if (!mappingSheet) {
-    Logger.log('Mapping sheet not found');
+    Logger.log('Account mapping sheet not found');
     return [];
   }
   
@@ -72,7 +76,7 @@ function getOpportunityDomains() {
   const domains = new Set();
   
   for (let i = 1; i < data.length; i++) {
-    const domainCell = data[i][1];
+    const domainCell = data[i][domainsColIndex];
     if (domainCell && typeof domainCell === 'string') {
       const domainList = domainCell.split(',').map(d => d.trim().toLowerCase());
       domainList.forEach(domain => {
@@ -237,22 +241,22 @@ function extractEmailData(message) {
   const uniqueCcDomains = [...new Set(ccDomainsArray)];
   const ccDomains = uniqueCcDomains.join(', ');
   
-  // Find opportunity by checking from, then all to addresses, then all cc addresses
-  let opportunity = findOpportunityByEmail(from);
+  // Get account info
+  let accountInfo = findAccountByEmail(from);
   
-  if (!opportunity && to) {
+  if (!accountInfo && to) {
     const toEmails = to.split(',').map(e => e.trim());
     for (const email of toEmails) {
-      opportunity = findOpportunityByEmail(email);
-      if (opportunity) break;
+      accountInfo = findAccountByEmail(email);
+      if (accountInfo) break;
     }
   }
   
-  if (!opportunity && cc) {
+  if (!accountInfo && cc) {
     const ccEmails = cc.split(',').map(e => e.trim());
     for (const email of ccEmails) {
-      opportunity = findOpportunityByEmail(email);
-      if (opportunity) break;
+      accountInfo = findAccountByEmail(email);
+      if (accountInfo) break;
     }
   }
   
@@ -267,7 +271,8 @@ function extractEmailData(message) {
     ccDomains: ccDomains,
     subject: subject,
     bodyPreview: body.substring(0, 500),
-    opportunity: opportunity || '',
+    accountId: accountInfo ? accountInfo.accountId : '',
+    accountName: accountInfo ? accountInfo.accountName : '',
     threadId: message.getThread().getId()
   };
 }
@@ -293,7 +298,8 @@ function writeEmailsToSheet(emails) {
       'CC Domains',
       'Subject',
       'Body Preview',
-      'Opportunity',
+      'Account ID',
+      'Account Name',
       'Thread ID'
     ];
     
@@ -327,7 +333,8 @@ function writeEmailsToSheet(emails) {
     email.ccDomains,
     email.subject,
     email.bodyPreview,
-    email.opportunity,
+    email.accountId,
+    email.accountName,
     email.threadId
   ]);
   
@@ -338,7 +345,7 @@ function writeEmailsToSheet(emails) {
   sheet.getRange(lastRow + 1, dateCol, rows.length, 1)
     .setNumberFormat('yyyy-mm-dd hh:mm:ss');
   
-  for (let i = 1; i <= 12; i++) {
+  for (let i = 1; i <= 13; i++) {
     sheet.autoResizeColumn(i);
   }
   

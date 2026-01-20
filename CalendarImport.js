@@ -3,6 +3,8 @@
  * 
  * Imports calendar events from past year and future year
  * Optimized for minimal API calls and fast sheet operations
+ * 
+ * Updated: Now uses account-centric model (AccountMapping.js)
  */
 
 /**
@@ -95,6 +97,7 @@ function fetchCalendarEvents(config) {
 
 /**
  * Process events into flat structure for sheet storage
+ * Optimized: builds lookup maps once instead of per-event
  */
 function processCalendarEvents(events) {
   const headers = [
@@ -117,8 +120,15 @@ function processCalendarEvents(events) {
     'Declined Count',
     'Tentative Count',
     'No Response Count',
-    'Opportunity'
+    'Account ID',
+    'Account Name'
   ];
+  
+  // Build lookup maps ONCE for all events (major performance optimization)
+  const domainToAccountMap = buildDomainToAccountMap();
+  const accountMap = buildAccountMap();
+  
+  Logger.log(`Processing ${events.length} events with ${domainToAccountMap.size} domain mappings`);
   
   const rows = events.map(event => {
     const duration = (event.endTime - event.startTime) / (1000 * 60 * 60);
@@ -132,23 +142,18 @@ function processCalendarEvents(events) {
     const tentativeCount = event.attendees.filter(a => a.status === 'MAYBE').length;
     const noResponseCount = event.attendees.filter(a => a.status === 'INVITED' || a.status === 'AWAITING').length;
     
-    // Find opportunity by checking all attendee emails
-    // Prioritize external domains (non-observepoint.com) for better customer mapping
-    let opportunity = '';
+    // Find account by checking external attendee emails
+    let accountId = '';
+    let accountName = '';
     const externalAttendees = event.attendees.filter(a => a.email && !a.email.toLowerCase().includes('@observepoint.com'));
-    const internalAttendees = event.attendees.filter(a => a.email && a.email.toLowerCase().includes('@observepoint.com'));
     
-    // Check external attendees first
+    // Check external attendees first (using cached lookup)
     for (const attendee of externalAttendees) {
-      opportunity = findOpportunityByEmail(attendee.email);
-      if (opportunity) break;
-    }
-    
-    // If no external match, check internal attendees
-    if (!opportunity) {
-      for (const attendee of internalAttendees) {
-        opportunity = findOpportunityByEmail(attendee.email);
-        if (opportunity) break;
+      const accountInfo = findAccountByEmailCached(attendee.email, domainToAccountMap, accountMap);
+      if (accountInfo) {
+        accountId = accountInfo.accountId || '';
+        accountName = accountInfo.accountName || '';
+        break;
       }
     }
     
@@ -172,7 +177,8 @@ function processCalendarEvents(events) {
       declinedCount,
       tentativeCount,
       noResponseCount,
-      opportunity || ''
+      accountId || '',
+      accountName || ''
     ];
   });
   
