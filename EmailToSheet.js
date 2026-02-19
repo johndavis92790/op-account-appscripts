@@ -35,12 +35,38 @@ function onOpen() {
       .addItem('Remove Auto-Import', 'removeGitHubAutoImport')
       .addItem('Sync Account Labels to GitHub', 'syncAccountLabelsToGitHub')
       .addItem('Test Import', 'testGitHubImport'))
+    .addSubMenu(ui.createMenu('Meeting Recaps (Webhook)')
+      .addItem('Test Webhook Processing', 'testMeetingRecapWebhook')
+      .addItem('Match to Calendar Events', 'matchMeetingRecapsToCalendarEventsManual')
+      .addItem('Create Missing GitHub Issues', 'createMissingGitHubIssuesFromActionItems'))
     .addSubMenu(ui.createMenu('Account Mapping')
       .addItem('Initialize/Refresh Account Mapping', 'initializeAccountMapping'))
     .addSubMenu(ui.createMenu('Email Communications')
       .addItem('Import Emails by Domain', 'importEmailsByDomainManual')
       .addItem('Setup Auto-Import (15 min)', 'setupEmailAutoImport')
       .addItem('Reset Sync State', 'resetEmailSyncState'))
+    .addSubMenu(ui.createMenu('Account Data Raw')
+      .addItem('Generate Account Data Raw', 'generateAccountDataRawManual'))
+    .addSubMenu(ui.createMenu('📝 Account Notes')
+      .addItem('Open Notes Sidebar', 'openNotesSidebar'))
+    .addSubMenu(ui.createMenu('🆕 Customer Lifecycle')
+      .addItem('Check for New Customers', 'showNewCustomerChecklist')
+      .addItem('Setup Auto-Detection (Daily)', 'setupNewCustomerAutoDetection')
+      .addItem('Remove Auto-Detection', 'removeNewCustomerAutoDetection'))
+    .addSubMenu(ui.createMenu('� Data Integrity')
+      .addItem('Fix Email Account References', 'fixEmailAccountReferencesManual')
+      .addItem('Comprehensive Table Remapping', 'comprehensiveRemappingManual')
+      .addItem('Fix Missing Meeting Recap Accounts', 'fixMissingAccountsInMeetingRecapsManual'))
+    .addSubMenu(ui.createMenu('🧹 Duplicate Cleanup')
+      .addItem('🔍 Preview Duplicate GitHub Issues', 'previewDuplicateGeneratedIssues')
+      .addItem('🗑️ Close Duplicate GitHub Issues', 'cleanupDuplicateGeneratedIssues')
+      .addItem('❌ DELETE Duplicate GitHub Issues (Permanent)', 'deleteDuplicateGeneratedIssues')
+      .addItem('📋 Deduplicate Meeting Recaps Sheet', 'deduplicateMeetingRecapsSheet')
+      .addItem('🔄 Clear GitHub Issue IDs (Reset Tracking)', 'clearGitHubIssueIdsFromRecaps')
+      .addSeparator()
+      .addItem('⚡ Run Full Cleanup (All Steps)', 'runFullDuplicateCleanup')
+      .addSeparator()
+      .addItem('🐛 Debug: Check GitHub API Response', 'debugGeneratedIssues'))
     .addToUi();
 }
 
@@ -68,7 +94,9 @@ function importLatestCSV(configId) {
   Logger.log('=== Starting CSV Import from Email ===');
   
   try {
-    const config = getEmailConfig(configId);
+    // Handle trigger event object - time-driven triggers pass an event object as first param
+    const actualConfigId = (typeof configId === 'string') ? configId : undefined;
+    const config = getEmailConfig(actualConfigId);
     Logger.log(`Importing: ${config.name}`);
     
     Logger.log('Step 1: Searching for emails...');
@@ -434,12 +462,12 @@ function testEmailSearch() {
 function setupAutoImport() {
   const triggers = ScriptApp.getProjectTriggers();
   triggers.forEach(trigger => {
-    if (trigger.getHandlerFunction() === 'importLatestCSV') {
+    if (trigger.getHandlerFunction() === 'importLatestCSV' || trigger.getHandlerFunction() === 'importAllCSVs') {
       ScriptApp.deleteTrigger(trigger);
     }
   });
   
-  ScriptApp.newTrigger('importLatestCSV')
+  ScriptApp.newTrigger('importAllCSVs')
     .timeBased()
     .atHour(2)
     .everyDays(1)
@@ -450,7 +478,11 @@ function setupAutoImport() {
   
   SpreadsheetApp.getUi().alert(
     'Auto-Import Enabled',
-    'CSV will now be imported automatically every day at 2am MST.',
+    'All CSV reports will now be imported automatically every day at 2am MST.\n\n' +
+    'This includes:\n' +
+    '• Renewal Opportunities\n' +
+    '• Opptys Report\n' +
+    '• Accounts Card Report',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }

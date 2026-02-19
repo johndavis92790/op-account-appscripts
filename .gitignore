@@ -4,8 +4,5 @@
 # macOS
 .DS_Store
 
-# Sample data
-*.csv
-
 # Logs
 *.log

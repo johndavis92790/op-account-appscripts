@@ -108,6 +108,7 @@ function fetchGitHubProject(config) {
                 ... on Issue {
                   number
                   title
+                  body
                   url
                   state
                   createdAt
@@ -132,6 +133,7 @@ function fetchGitHubProject(config) {
                 }
                 ... on DraftIssue {
                   title
+                  body
                   createdAt
                   updatedAt
                   assignees(first: 10) {
@@ -143,6 +145,7 @@ function fetchGitHubProject(config) {
                 ... on PullRequest {
                   number
                   title
+                  body
                   url
                   state
                   createdAt
@@ -204,6 +207,7 @@ function parseProjectItem(item) {
     id: item.id,
     type: item.type,
     title: '',
+    description: '',
     url: '',
     state: '',
     number: null,
@@ -221,6 +225,7 @@ function parseProjectItem(item) {
   if (item.content) {
     const content = item.content;
     parsed.title = content.title || '';
+    parsed.description = content.body || '';
     parsed.url = content.url || '';
     parsed.state = content.state || '';
     parsed.number = content.number || null;
@@ -319,6 +324,7 @@ function processGitHubTasks(projectData) {
     'Type',
     'Number',
     'Title',
+    'Description',
     'Status',
     'Priority',
     'State',
@@ -349,6 +355,7 @@ function processGitHubTasks(projectData) {
       item.type,
       item.number || '',
       item.title,
+      item.description,
       item.status,
       item.priority,
       item.state,
@@ -389,9 +396,9 @@ function writeGitHubToSheet(data, sheetName) {
       .setBackground('#4078c0')
       .setFontColor('#ffffff');
     
-    const createdCol = 14;
-    const updatedCol = 15;
-    const closedCol = 16;
+    const createdCol = 15;
+    const updatedCol = 16;
+    const closedCol = 17;
     if (data.length > 1) {
       sheet.getRange(2, createdCol, data.length - 1, 1)
         .setNumberFormat('yyyy-mm-dd hh:mm');

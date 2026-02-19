@@ -137,6 +137,11 @@ function fetchEmailsByDomains(domains, lastSyncDate) {
   const emails = [];
   const processedIds = new Set();
   
+  // Build lookup maps ONCE for all emails (major performance optimization)
+  const domainToAccountMap = buildDomainToAccountMap();
+  const accountMap = buildAccountMap();
+  Logger.log(`Built account maps: ${domainToAccountMap.size} domain mappings, ${accountMap.size} accounts`);
+  
   const batchSize = 5;
   
   for (let i = 0; i < domains.length; i += batchSize) {
@@ -157,7 +162,12 @@ function fetchEmailsByDomains(domains, lastSyncDate) {
         if (!processedIds.has(messageId)) {
           processedIds.add(messageId);
           
-          const emailData = extractEmailData(message);
+          const emailData = extractEmailData(message, domainToAccountMap, accountMap);
+          
+          // Skip if email was filtered out
+          if (!emailData) {
+            return;
+          }
           
           const hasMatchingDomain = domains.some(domain => {
             return emailData.from.includes(domain) ||
@@ -220,7 +230,7 @@ function getEmailDomain(email) {
 /**
  * Extract relevant data from email message
  */
-function extractEmailData(message) {
+function extractEmailData(message, domainToAccountMap, accountMap) {
   const from = message.getFrom();
   const to = message.getTo();
   const cc = message.getCc();
@@ -228,6 +238,32 @@ function extractEmailData(message) {
   const date = message.getDate();
   const body = message.getPlainBody();
   const messageId = message.getId();
+  
+  // Filter out unwanted subjects
+  const excludedSubjects = [
+    "In case you missed it: Here's Your 2025 ObservePoint Year in Review"
+  ];
+  
+  // Filter out calendar-related automated emails
+  const calendarPrefixes = [
+    "Invitation:",
+    "Accepted:",
+    "Declined:",
+    "Updated invitation:",
+    "Updated invitation with note:",
+    "Canceled:",
+    "Our meeting in"
+  ];
+  
+  // Check exact matches
+  if (excludedSubjects.some(excluded => subject.includes(excluded))) {
+    return null;
+  }
+  
+  // Check calendar prefixes
+  if (calendarPrefixes.some(prefix => subject.startsWith(prefix))) {
+    return null;
+  }
   
   const fromDomain = getEmailDomain(from);
   
@@ -241,13 +277,13 @@ function extractEmailData(message) {
   const uniqueCcDomains = [...new Set(ccDomainsArray)];
   const ccDomains = uniqueCcDomains.join(', ');
   
-  // Get account info
-  let accountInfo = findAccountByEmail(from);
+  // Get account info using cached maps
+  let accountInfo = findAccountByEmailCached(from, domainToAccountMap, accountMap);
   
   if (!accountInfo && to) {
     const toEmails = to.split(',').map(e => e.trim());
     for (const email of toEmails) {
-      accountInfo = findAccountByEmail(email);
+      accountInfo = findAccountByEmailCached(email, domainToAccountMap, accountMap);
       if (accountInfo) break;
     }
   }
@@ -255,7 +291,7 @@ function extractEmailData(message) {
   if (!accountInfo && cc) {
     const ccEmails = cc.split(',').map(e => e.trim());
     for (const email of ccEmails) {
-      accountInfo = findAccountByEmail(email);
+      accountInfo = findAccountByEmailCached(email, domainToAccountMap, accountMap);
       if (accountInfo) break;
     }
   }
@@ -300,7 +336,8 @@ function writeEmailsToSheet(emails) {
       'Body Preview',
       'Account ID',
       'Account Name',
-      'Thread ID'
+      'Thread ID',
+      'Cleaned Body'
     ];
     
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -335,7 +372,8 @@ function writeEmailsToSheet(emails) {
     email.bodyPreview,
     email.accountId,
     email.accountName,
-    email.threadId
+    email.threadId,
+    '' // Cleaned Body - will be populated by AI formula
   ]);
   
   const lastRow = sheet.getLastRow();
@@ -345,7 +383,7 @@ function writeEmailsToSheet(emails) {
   sheet.getRange(lastRow + 1, dateCol, rows.length, 1)
     .setNumberFormat('yyyy-mm-dd hh:mm:ss');
   
-  for (let i = 1; i <= 13; i++) {
+  for (let i = 1; i <= 14; i++) {
     sheet.autoResizeColumn(i);
   }
   

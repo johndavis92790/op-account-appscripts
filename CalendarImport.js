@@ -27,6 +27,14 @@ function importCalendarEvents() {
     Logger.log('Step 3: Writing to sheet...');
     writeCalendarToSheet(processedData, config.sheetName);
     
+    // Match to meeting recaps
+    Logger.log('Step 4: Matching to meeting recaps...');
+    try {
+      matchMeetingRecapsToCalendarEvents();
+    } catch (matchError) {
+      Logger.log('Warning: Meeting recap matching failed: ' + matchError.message);
+    }
+    
     const duration = (new Date() - startTime) / 1000;
     Logger.log(`=== Import Complete in ${duration}s ===`);
     
@@ -81,14 +89,30 @@ function fetchCalendarEvents(config) {
       description: event.getDescription() || '',
       isAllDay: event.isAllDayEvent(),
       attendees: guests.map(guest => {
-        const guestStatus = guest.getGuestStatus();
-        return {
-          email: guest.getEmail() || '',
-          name: guest.getName() || '',
-          status: guestStatus ? guestStatus.toString() : 'UNKNOWN'
-        };
+        try {
+          const guestStatus = guest.getGuestStatus();
+          const statusString = guestStatus ? String(guestStatus) : 'UNKNOWN';
+          return {
+            email: guest.getEmail() || '',
+            name: guest.getName() || '',
+            status: statusString
+          };
+        } catch (e) {
+          return {
+            email: guest.getEmail() || '',
+            name: guest.getName() || '',
+            status: 'UNKNOWN'
+          };
+        }
       }),
-      myStatus: event.getMyStatus() ? event.getMyStatus().toString() : 'UNKNOWN',
+      myStatus: (() => {
+        try {
+          const status = event.getMyStatus();
+          return status ? String(status) : 'UNKNOWN';
+        } catch (e) {
+          return 'UNKNOWN';
+        }
+      })(),
       creator: event.getCreators()[0] || '',
       isRecurring: event.isRecurringEvent()
     };
@@ -121,7 +145,8 @@ function processCalendarEvents(events) {
     'Tentative Count',
     'No Response Count',
     'Account ID',
-    'Account Name'
+    'Account Name',
+    'Meeting Recap ID'
   ];
   
   // Build lookup maps ONCE for all events (major performance optimization)
@@ -178,7 +203,8 @@ function processCalendarEvents(events) {
       tentativeCount,
       noResponseCount,
       accountId || '',
-      accountName || ''
+      accountName || '',
+      '' // Meeting Recap ID - populated by matcher
     ];
   });
   

@@ -28,7 +28,14 @@ function getGitHubConfig() {
       'Blocked': 'Blocked',
       'Ready': 'Ready',
       'In progress': 'In Progress',
-      'Done': 'Done'
+      'Done': 'Done',
+      'Generated': 'Generated'
+    },
+    
+    // Repository for creating new issues
+    issueRepository: {
+      owner: 'johndavis92790',
+      name: 'OP-Tasklist'
     }
   };
 }
