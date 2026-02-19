@@ -97,9 +97,14 @@ function loadSourceData() {
   const actionItemsData = actionItemsSheet ? actionItemsSheet.getDataRange().getValues() : [[]];
   const actionItemsHeaders = actionItemsData.length > 0 ? actionItemsData[0] : [];
   
+  // Load Notes Storage
+  const notesSheet = spreadsheet.getSheetByName('Notes Storage');
+  const notesData = notesSheet ? notesSheet.getDataRange().getValues() : [[]];
+  const notesHeaders = notesData.length > 0 ? notesData[0] : [];
+  
   Logger.log(`Loaded: ${accountsData.length} accounts, ${opptysData.length} opportunities, ${renewalData.length} renewals`);
   Logger.log(`Loaded: ${githubData.length} tasks, ${emailData.length} emails, ${calendarData.length} events`);
-  Logger.log(`Loaded: ${meetingRecapsData.length} meeting recaps, ${actionItemsData.length} action items`);
+  Logger.log(`Loaded: ${meetingRecapsData.length} meeting recaps, ${actionItemsData.length} action items, ${notesData.length} notes`);
   
   return {
     accounts: { data: accountsData, headers: accountsHeaders },
@@ -109,7 +114,8 @@ function loadSourceData() {
     emails: { data: emailData, headers: emailHeaders },
     calendar: { data: calendarData, headers: calendarHeaders },
     meetingRecaps: { data: meetingRecapsData, headers: meetingRecapsHeaders },
-    actionItems: { data: actionItemsData, headers: actionItemsHeaders }
+    actionItems: { data: actionItemsData, headers: actionItemsHeaders },
+    notes: { data: notesData, headers: notesHeaders }
   };
 }
 
@@ -126,6 +132,7 @@ function buildConsolidatedData(sourceData) {
   const calendarByAccountMap = buildCalendarByAccountMap(sourceData.calendar);
   const meetingRecapsByAccountMap = buildMeetingRecapsByAccountMap(sourceData.meetingRecaps);
   const actionItemsByAccountMap = buildActionItemsByAccountMap(sourceData.actionItems);
+  const notesByAccountMap = buildNotesByAccountMap(sourceData.notes);
   
   // Get column indices from Accounts Card Report
   const accountIdIdx = sourceData.accounts.headers.indexOf('Id');
@@ -181,6 +188,8 @@ function buildConsolidatedData(sourceData) {
     'Meetings',
     'Meeting Recaps',
     'Meeting Action Items',
+    // Account notes (plain text, stripped of HTML)
+    'Account Notes',
     // AI-generated summary (formula injected post-write)
     'AI Engagement Summary',
     // Hash of content-based inputs — used to skip AI() regeneration when nothing meaningful changed
@@ -212,6 +221,7 @@ function buildConsolidatedData(sourceData) {
     const meetings = calendarByAccountMap.get(accountId) || [];
     const meetingRecaps = meetingRecapsByAccountMap.get(accountId) || [];
     const actionItems = actionItemsByAccountMap.get(accountId) || [];
+    const accountNotesText = notesByAccountMap.get(accountId) || '';
     
     // Build JSON strings
     const tasksJson = buildTasksJson(tasks);
@@ -275,6 +285,8 @@ function buildConsolidatedData(sourceData) {
       meetingsJson,
       meetingRecapsJson,
       actionItemsJson,
+      // Account notes plain text
+      accountNotesText,
       // AI Engagement Summary - formula injected by writeAccountDataRaw after setValues
       '',
       // AI Prompt Hash - written by writeAccountDataRaw after setValues
@@ -924,6 +936,63 @@ function buildActionItemsByAccountMap(actionItems) {
   }
   
   Logger.log(`Built action items map with ${map.size} accounts having action items`);
+  return map;
+}
+
+/**
+ * Build map of Account ID -> plain text notes (HTML stripped)
+ * Notes Storage schema: Account ID | Account Name | Notes Content | Last Saved
+ */
+function buildNotesByAccountMap(notes) {
+  const map = new Map();
+
+  if (!notes || notes.data.length <= 1) {
+    Logger.log('No notes data available');
+    return map;
+  }
+
+  const headers = notes.headers;
+  const accountIdIdx = headers.indexOf('Account ID');
+  const contentIdx = headers.indexOf('Notes Content');
+
+  if (accountIdIdx === -1 || contentIdx === -1) {
+    Logger.log('Notes Storage sheet missing required columns (Account ID, Notes Content)');
+    return map;
+  }
+
+  for (let i = 1; i < notes.data.length; i++) {
+    const accountId = (notes.data[i][accountIdIdx] || '').toString().trim();
+    const rawHtml = (notes.data[i][contentIdx] || '').toString().trim();
+
+    if (!accountId || !rawHtml || rawHtml === '<p><br></p>') continue;
+
+    // Strip HTML tags and decode common entities to produce readable plain text
+    let text = rawHtml
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&rsquo;/g, '\u2019')
+      .replace(/&ldquo;/g, '\u201C')
+      .replace(/&rdquo;/g, '\u201D')
+      .replace(/&ndash;/g, '\u2013')
+      .replace(/&mdash;/g, '\u2014')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\uFEFF/g, '')        // strip BOM/zero-width chars Quill adds
+      .replace(/\n{3,}/g, '\n\n')    // collapse excessive blank lines
+      .trim();
+
+    if (text) {
+      map.set(accountId, text);
+    }
+  }
+
+  Logger.log(`Built notes map with ${map.size} accounts having notes`);
   return map;
 }
 
