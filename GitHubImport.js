@@ -49,14 +49,18 @@ function importGitHubTasks() {
  */
 function fetchGitHubProject(config) {
   const query = `
-    query($login: String!, $number: Int!) {
+    query($login: String!, $number: Int!, $cursor: String) {
       user(login: $login) {
         projectV2(number: $number) {
           id
           title
           shortDescription
           url
-          items(first: 100) {
+          items(first: 100, after: $cursor) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
               id
               type
@@ -177,25 +181,50 @@ function fetchGitHubProject(config) {
     }
   `;
   
-  const variables = {
-    login: config.githubUsername,
-    number: config.projectNumber
-  };
+  // Paginate through all project items
+  let allItems = [];
+  let cursor = null;
+  let projectMeta = null;
+  let page = 0;
   
-  const response = makeGitHubGraphQLRequest(config.githubToken, query, variables);
-  
-  if (!response.data || !response.data.user || !response.data.user.projectV2) {
-    throw new Error('Failed to fetch project data. Check your username and project number.');
-  }
-  
-  const project = response.data.user.projectV2;
+  do {
+    page++;
+    const variables = {
+      login: config.githubUsername,
+      number: config.projectNumber,
+      cursor: cursor
+    };
+    
+    const response = makeGitHubGraphQLRequest(config.githubToken, query, variables);
+    
+    if (!response.data || !response.data.user || !response.data.user.projectV2) {
+      throw new Error('Failed to fetch project data. Check your username and project number.');
+    }
+    
+    const project = response.data.user.projectV2;
+    if (!projectMeta) {
+      projectMeta = {
+        id: project.id,
+        title: project.title,
+        description: project.shortDescription || '',
+        url: project.url
+      };
+    }
+    
+    const items = project.items;
+    allItems = allItems.concat(items.nodes.map(item => parseProjectItem(item)));
+    
+    cursor = items.pageInfo.hasNextPage ? items.pageInfo.endCursor : null;
+    Logger.log(`Page ${page}: fetched ${items.nodes.length} items (total so far: ${allItems.length})`);
+    
+    // Rate limit between pages
+    if (cursor) Utilities.sleep(200);
+    
+  } while (cursor && page < 20); // Safety limit of 20 pages = 2000 items max
   
   return {
-    id: project.id,
-    title: project.title,
-    description: project.shortDescription || '',
-    url: project.url,
-    items: project.items.nodes.map(item => parseProjectItem(item))
+    ...projectMeta,
+    items: allItems
   };
 }
 
@@ -340,6 +369,16 @@ function processGitHubTasks(projectData) {
     'Custom Fields'
   ];
   
+  // Build account map ONCE, then reuse for all items
+  const accountMap = buildAccountMap();
+  const nameToIdMap = new Map();
+  for (const [accountId, accountInfo] of accountMap) {
+    if (accountInfo.accountName) {
+      nameToIdMap.set(accountInfo.accountName, accountId);
+    }
+  }
+  Logger.log(`Built account name lookup with ${nameToIdMap.size} entries (cached for all ${projectData.items.length} items)`);
+  
   const rows = projectData.items.map(item => {
     const customFieldsStr = Object.keys(item.customFields)
       .filter(key => key.toLowerCase() !== 'status' && key.toLowerCase() !== 'priority')
@@ -348,7 +387,7 @@ function processGitHubTasks(projectData) {
     
     // Find account from labels (account:AccountName format)
     const accountName = getAccountFromGitHubLabels(item.labels);
-    const accountInfo = accountName ? getAccountInfoByName(accountName) : null;
+    const accountId = accountName ? (nameToIdMap.get(accountName) || '') : '';
     
     return [
       item.id,
@@ -363,7 +402,7 @@ function processGitHubTasks(projectData) {
       item.url,
       item.assignees.join(', '),
       item.labels.join(', '),
-      accountInfo ? accountInfo.accountId : '',
+      accountId,
       accountName || '',
       item.createdAt || '',
       item.updatedAt || '',
@@ -406,10 +445,6 @@ function writeGitHubToSheet(data, sheetName) {
         .setNumberFormat('yyyy-mm-dd hh:mm');
       sheet.getRange(2, closedCol, data.length - 1, 1)
         .setNumberFormat('yyyy-mm-dd hh:mm');
-    }
-    
-    for (let i = 1; i <= data[0].length; i++) {
-      sheet.autoResizeColumn(i);
     }
     
     sheet.setFrozenRows(1);

@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only allow authenticated user john.davis@observepoint.com
+    function isAuthorized() {
+      return request.auth != null && request.auth.token.email == 'john.davis@observepoint.com';
+    }
+
+    // Account documents - read/write for authorized user
+    match /accounts/{accountId} {
+      allow read, write: if isAuthorized();
+
+      // Manual tasks subcollection
+      match /manualTasks/{taskId} {
+        allow read, write: if isAuthorized();
+      }
+    }
+  }
+}

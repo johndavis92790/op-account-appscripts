@@ -52,71 +52,99 @@ function importCalendarEvents() {
 }
 
 /**
- * Fetch calendar events efficiently (single API call per calendar)
+ * Fetch calendar events using Calendar Advanced Service (bulk REST API)
+ * Returns all event data in paginated API calls instead of individual RPCs
  */
 function fetchCalendarEvents(config) {
-  const calendar = CalendarApp.getCalendarById(config.calendarId);
-  
-  if (!calendar) {
-    throw new Error(`Calendar not found: ${config.calendarId}`);
-  }
-  
   const now = new Date();
   const startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
   const endDate = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
   
   Logger.log(`Fetching events from ${startDate.toISOString()} to ${endDate.toISOString()}`);
   
-  const events = calendar.getEvents(startDate, endDate);
+  const excludedTitlesSet = new Set(config.excludedTitles || []);
+  const calendarId = config.calendarId === 'primary' ? 'primary' : config.calendarId;
   
-  const excludedTitles = config.excludedTitles || [];
-  const filteredEvents = events.filter(event => {
-    const title = event.getTitle();
-    return !excludedTitles.includes(title);
-  });
+  // Fetch all events via Advanced Service (bulk - all data in one call per page)
+  const allItems = [];
+  let pageToken = null;
   
-  Logger.log(`Filtered ${events.length} events down to ${filteredEvents.length} (excluded ${events.length - filteredEvents.length})`);
-  
-  return filteredEvents.map(event => {
-    const guests = event.getGuestList();
-    
-    return {
-      id: event.getId(),
-      title: event.getTitle(),
-      startTime: event.getStartTime(),
-      endTime: event.getEndTime(),
-      location: event.getLocation() || '',
-      description: event.getDescription() || '',
-      isAllDay: event.isAllDayEvent(),
-      attendees: guests.map(guest => {
-        try {
-          const guestStatus = guest.getGuestStatus();
-          const statusString = guestStatus ? String(guestStatus) : 'UNKNOWN';
-          return {
-            email: guest.getEmail() || '',
-            name: guest.getName() || '',
-            status: statusString
-          };
-        } catch (e) {
-          return {
-            email: guest.getEmail() || '',
-            name: guest.getName() || '',
-            status: 'UNKNOWN'
-          };
-        }
-      }),
-      myStatus: (() => {
-        try {
-          const status = event.getMyStatus();
-          return status ? String(status) : 'UNKNOWN';
-        } catch (e) {
-          return 'UNKNOWN';
-        }
-      })(),
-      creator: event.getCreators()[0] || '',
-      isRecurring: event.isRecurringEvent()
+  do {
+    const options = {
+      timeMin: startDate.toISOString(),
+      timeMax: endDate.toISOString(),
+      singleEvents: true,
+      maxResults: 2500,
+      orderBy: 'startTime'
     };
-  });
+    if (pageToken) options.pageToken = pageToken;
+    
+    const response = Calendar.Events.list(calendarId, options);
+    const items = response.items || [];
+    allItems.push(...items);
+    pageToken = response.nextPageToken;
+  } while (pageToken);
+  
+  Logger.log(`Retrieved ${allItems.length} raw events from API`);
+  
+  // Filter and transform in-memory (no RPCs needed)
+  const filteredEvents = [];
+  for (const item of allItems) {
+    const title = item.summary || '';
+    if (excludedTitlesSet.has(title)) continue;
+    
+    // Parse start/end times
+    const startTime = item.start.dateTime
+      ? new Date(item.start.dateTime)
+      : new Date(item.start.date);
+    const endTime = item.end.dateTime
+      ? new Date(item.end.dateTime)
+      : new Date(item.end.date);
+    const isAllDay = !item.start.dateTime;
+    
+    // Parse attendees from JSON (no RPCs)
+    const attendees = (item.attendees || []).map(a => {
+      const statusMap = {
+        'accepted': 'YES',
+        'declined': 'NO',
+        'tentative': 'MAYBE',
+        'needsAction': 'INVITED'
+      };
+      return {
+        email: a.email || '',
+        name: a.displayName || a.email || '',
+        status: statusMap[a.responseStatus] || 'UNKNOWN'
+      };
+    });
+    
+    // Determine my status from attendees list
+    let myStatus = 'UNKNOWN';
+    if (item.attendees) {
+      const me = item.attendees.find(a => a.self);
+      if (me) {
+        const statusMap = { 'accepted': 'YES', 'declined': 'NO', 'tentative': 'MAYBE', 'needsAction': 'INVITED' };
+        myStatus = statusMap[me.responseStatus] || 'UNKNOWN';
+      }
+    }
+    
+    filteredEvents.push({
+      id: item.id || '',
+      title: title,
+      startTime: startTime,
+      endTime: endTime,
+      location: item.location || '',
+      description: item.description || '',
+      isAllDay: isAllDay,
+      attendees: attendees,
+      myStatus: myStatus,
+      creator: (item.creator && item.creator.email) || '',
+      isRecurring: !!item.recurringEventId
+    });
+  }
+  
+  Logger.log(`Filtered to ${filteredEvents.length} events (excluded ${allItems.length - filteredEvents.length})`);
+  
+  return filteredEvents;
 }
 
 /**
@@ -245,10 +273,6 @@ function writeCalendarToSheet(data, sheetName) {
     if (data.length > 1) {
       sheet.getRange(2, durationCol, data.length - 1, 1)
         .setNumberFormat('0.00');
-    }
-    
-    for (let i = 1; i <= data[0].length; i++) {
-      sheet.autoResizeColumn(i);
     }
     
     sheet.setFrozenRows(1);

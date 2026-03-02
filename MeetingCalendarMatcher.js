@@ -106,112 +106,92 @@ function matchMeetingRecapsToCalendarEvents() {
     
     Logger.log(`Matching ${recaps.length} recaps against ${events.length} calendar events`);
     
+    // Build index: normalized title -> array of events (O(1) lookup instead of scanning all events)
+    const eventsByTitle = new Map();
+    for (const event of events) {
+      const key = event.title.trim();
+      if (!eventsByTitle.has(key)) eventsByTitle.set(key, []);
+      eventsByTitle.get(key).push(event);
+    }
+    
     // Perform matching
     const matches = [];
+    let noMatchCount = 0;
     
     for (const recap of recaps) {
-      // Normalize to UTC date for comparison (ignores timezone differences)
       const recapDateStr = `${recap.startTime.getUTCFullYear()}-${String(recap.startTime.getUTCMonth() + 1).padStart(2, '0')}-${String(recap.startTime.getUTCDate()).padStart(2, '0')}`;
       
-      Logger.log(`\nProcessing recap: "${recap.title}"`);
-      Logger.log(`  Recap date: ${recapDateStr}, Account: ${recap.accountId}`);
+      // O(1) title lookup instead of scanning all events
+      const titleMatches = eventsByTitle.get(recap.title.trim()) || [];
       
-      // Find all calendar events with EXACT title match, same day, and same Account ID
-      const candidates = events.filter(event => {
-        // Must have exact title match (trim whitespace to handle leading/trailing spaces)
-        if (event.title.trim() !== recap.title.trim()) return false;
-        
-        // Must be on the same day (compare UTC dates to handle timezone differences)
+      // Filter by date and account (only iterates events with matching title)
+      const candidates = [];
+      for (const event of titleMatches) {
         const eventDateStr = `${event.startTime.getUTCFullYear()}-${String(event.startTime.getUTCMonth() + 1).padStart(2, '0')}-${String(event.startTime.getUTCDate()).padStart(2, '0')}`;
-        if (eventDateStr !== recapDateStr) {
-          Logger.log(`  Skipping event "${event.title}" - date mismatch: ${eventDateStr} vs ${recapDateStr}`);
-          return false;
-        }
+        if (eventDateStr !== recapDateStr) continue;
         
         // If both have Account IDs, they must match
-        // This prevents matching meetings with same title but different accounts
-        if (recap.accountId && event.accountId) {
-          if (recap.accountId !== event.accountId) {
-            Logger.log(`  Skipping event "${event.title}" - account mismatch: ${event.accountId} vs ${recap.accountId}`);
-            return false;
-          }
-        }
+        if (recap.accountId && event.accountId && recap.accountId !== event.accountId) continue;
         
-        Logger.log(`  Found candidate: "${event.title}" at ${event.startTime.toISOString()}`);
-        return true;
-      });
+        candidates.push(event);
+      }
       
       if (candidates.length === 0) {
         Logger.log(`  ❌ No match for: "${recap.title}" on ${recapDateStr}`);
+        noMatchCount++;
         continue;
       }
       
-      // Find best match using START TIME proximity only (not duration)
-      let bestMatch = null;
-      let smallestStartDiff = Infinity;
+      // Find best match using START TIME proximity only
+      let bestMatch = candidates[0];
+      let smallestStartDiff = Math.abs(recap.startTime - candidates[0].startTime);
       
-      for (const event of candidates) {
-        // Only compare start times - duration doesn't matter
-        const startDiff = Math.abs(recap.startTime - event.startTime);
-        
+      for (let i = 1; i < candidates.length; i++) {
+        const startDiff = Math.abs(recap.startTime - candidates[i].startTime);
         if (startDiff < smallestStartDiff) {
           smallestStartDiff = startDiff;
-          bestMatch = event;
+          bestMatch = candidates[i];
         }
       }
       
-      if (bestMatch) {
-        matches.push({
-          recapId: recap.recapId,
-          recapRowIndex: recap.rowIndex,
-          eventId: bestMatch.eventId,
-          eventRowIndex: bestMatch.rowIndex,
-          timeDiff: smallestStartDiff
-        });
-        
-        const diffMinutes = Math.round(smallestStartDiff / 60000);
-        const matchType = candidates.length > 1 ? `${candidates.length} candidates` : 'unique';
-        Logger.log(`  ✓ Matched "${recap.title}" (${matchType}, start time diff: ${diffMinutes} min)`);
-      }
+      matches.push({
+        recapId: recap.recapId,
+        recapRowIndex: recap.rowIndex,
+        eventId: bestMatch.eventId,
+        eventRowIndex: bestMatch.rowIndex,
+        timeDiff: smallestStartDiff
+      });
+      
+      const diffMinutes = Math.round(smallestStartDiff / 60000);
+      const matchType = candidates.length > 1 ? `${candidates.length} candidates` : 'unique';
+      Logger.log(`  ✓ "${recap.title}" on ${recapDateStr} (${matchType}, Δ${diffMinutes}min)`);
     }
     
-    Logger.log(`Found ${matches.length} matches`);
+    Logger.log(`Found ${matches.length} matches, ${noMatchCount} unmatched`);
     
-    // Clear existing mappings in both sheets
-    if (recapCalEventIdIndex !== -1) {
-      Logger.log('Clearing existing Calendar Event IDs in Meeting Recaps...');
-      if (recapData.length > 1) {
-        recapSheet.getRange(2, recapCalEventIdIndex + 1, recapData.length - 1, 1).clearContent();
-      }
-    }
-    
-    if (eventRecapIdIndex !== -1) {
-      Logger.log('Clearing existing Meeting Recap IDs in Calendar Events...');
-      if (calendarData.length > 1) {
-        calendarSheet.getRange(2, eventRecapIdIndex + 1, calendarData.length - 1, 1).clearContent();
-      }
-    }
-    
-    // Update both sheets with matches
+    // Batch-write matches to both sheets (2 API calls instead of N individual ones)
+    // setValues covers all rows - unmatched rows get empty strings, replacing any stale data
     if (matches.length > 0) {
-      Logger.log('Writing matches to sheets...');
+      Logger.log(`Writing ${matches.length} matches to sheets...`);
       
       // Update Meeting Recaps sheet with Calendar Event IDs
       if (recapCalEventIdIndex !== -1) {
+        const recapColValues = new Array(recapData.length - 1).fill(['']);
         for (const match of matches) {
-          Logger.log(`  Writing to Meeting Recaps row ${match.recapRowIndex}, col ${recapCalEventIdIndex + 1}: ${match.eventId}`);
-          recapSheet.getRange(match.recapRowIndex, recapCalEventIdIndex + 1).setValue(match.eventId);
+          recapColValues[match.recapRowIndex - 2] = [match.eventId];
         }
+        recapSheet.getRange(2, recapCalEventIdIndex + 1, recapColValues.length, 1).setValues(recapColValues);
       } else {
         Logger.log('  WARNING: Calendar Event ID column not found in Meeting Recaps sheet');
       }
       
       // Update Calendar Events sheet with Meeting Recap IDs
       if (eventRecapIdIndex !== -1) {
+        const eventColValues = new Array(calendarData.length - 1).fill(['']);
         for (const match of matches) {
-          Logger.log(`  Writing to Calendar Events row ${match.eventRowIndex}, col ${eventRecapIdIndex + 1}: ${match.recapId}`);
-          calendarSheet.getRange(match.eventRowIndex, eventRecapIdIndex + 1).setValue(match.recapId);
+          eventColValues[match.eventRowIndex - 2] = [match.recapId];
         }
+        calendarSheet.getRange(2, eventRecapIdIndex + 1, eventColValues.length, 1).setValues(eventColValues);
       } else {
         Logger.log('  WARNING: Meeting Recap ID column not found in Calendar Events sheet');
       }

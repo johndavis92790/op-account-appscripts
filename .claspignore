@@ -10,3 +10,6 @@ test-*.js
 *.csv
 *.eml
 *.xlsx
+
+# account dashboard webapp
+account-dashboard/**
