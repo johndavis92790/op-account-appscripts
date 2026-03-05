@@ -69,6 +69,11 @@ function doPost(e) {
         log(`Task result: ${JSON.stringify(result)}`);
         break;
       
+      case 'close_task':
+        result = processCloseTaskWebhook(payload);
+        log(`Close task result: ${JSON.stringify(result)}`);
+        break;
+      
       default:
         log(`ERROR: Unknown webhook type: ${webhookType}`);
         logToSheet(webhookType, 'ERROR', 'Unknown type', logEntries);
@@ -1244,6 +1249,68 @@ function processCreateTaskWebhook(payload) {
     
   } catch (error) {
     Logger.log('ERROR in processCreateTaskWebhook: ' + error.message);
+    throw error;
+  }
+}
+
+/**
+ * Process a close_task webhook - closes a GitHub issue.
+ * Expects payload: { issueNumber: number }
+ */
+function processCloseTaskWebhook(payload) {
+  Logger.log('Processing close_task webhook...');
+  
+  const issueNumber = payload.issueNumber;
+  if (!issueNumber) {
+    throw new Error('Missing required field: issueNumber');
+  }
+  
+  try {
+    const config = validateGitHubConfig();
+    
+    const url = `https://api.github.com/repos/${GITHUB_ISSUE_REPO_OWNER}/${GITHUB_ISSUE_REPO_NAME}/issues/${issueNumber}`;
+    const response = UrlFetchApp.fetch(url, {
+      method: 'patch',
+      contentType: 'application/json',
+      headers: {
+        'Authorization': 'token ' + config.githubToken,
+        'Accept': 'application/vnd.github.v3+json',
+      },
+      payload: JSON.stringify({ state: 'closed' }),
+      muteHttpExceptions: true,
+    });
+    
+    const code = response.getResponseCode();
+    if (code !== 200) {
+      throw new Error(`GitHub API returned ${code}: ${response.getContentText().substring(0, 200)}`);
+    }
+    
+    // Also set project status to "Done" if possible
+    try {
+      const projectInfo = getProjectFieldInfo(config);
+      if (projectInfo && projectInfo.statusFieldId && projectInfo.doneOptionId) {
+        const issueData = JSON.parse(response.getContentText());
+        const issueNodeId = issueData.node_id;
+        const projectItemId = addIssueToProject(config.githubToken, projectInfo.projectId, issueNodeId);
+        if (projectItemId) {
+          setProjectItemField(
+            config.githubToken,
+            projectInfo.projectId,
+            projectItemId,
+            projectInfo.statusFieldId,
+            projectInfo.doneOptionId
+          );
+        }
+      }
+    } catch (projErr) {
+      Logger.log('Warning: Could not update project status to Done: ' + projErr.message);
+    }
+    
+    Logger.log(`✓ Closed issue #${issueNumber}`);
+    return { action: 'closed', issueNumber: issueNumber };
+    
+  } catch (error) {
+    Logger.log('ERROR in processCloseTaskWebhook: ' + error.message);
     throw error;
   }
 }

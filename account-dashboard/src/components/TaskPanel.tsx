@@ -10,6 +10,7 @@ import {
   CircleCheck,
   X,
   Loader2,
+  XCircle,
 } from 'lucide-react';
 
 interface TaskPanelProps {
@@ -35,6 +36,31 @@ export function TaskPanel({ tasks, manualTasks, accountId, accountName }: TaskPa
   const openTasks = tasks.filter((t) => !isTaskDone(t));
   const closedTasks = tasks.filter((t) => isTaskDone(t));
   const [showClosed, setShowClosed] = useState(false);
+  const [closingTask, setClosingTask] = useState<number | null>(null);
+
+  const handleCloseTask = async (issueNumber: number) => {
+    if (!issueNumber) return;
+    setClosingTask(issueNumber);
+    try {
+      const webhookUrl = import.meta.env.VITE_APPS_SCRIPT_WEBHOOK_URL;
+      if (webhookUrl) {
+        const res = await fetch(`${webhookUrl}?type=close_task`, {
+          method: 'POST',
+          body: JSON.stringify({ issueNumber }),
+        });
+        if (res.ok) {
+          const result = await res.json();
+          if (result.success) {
+            window.location.reload();
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to close task:', err);
+    } finally {
+      setClosingTask(null);
+    }
+  };
 
   const handleCreate = async () => {
     if (!form.title.trim()) return;
@@ -220,16 +246,29 @@ export function TaskPanel({ tasks, manualTasks, accountId, accountName }: TaskPa
                     </span>
                   )}
                 </div>
-                {task.url && (
-                  <a
-                    href={task.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-dark-500 hover:text-accent flex items-center gap-1 mt-0.5"
-                  >
-                    View on GitHub <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
+                <div className="flex items-center gap-2 mt-0.5">
+                  {task.url && (
+                    <a
+                      href={task.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-dark-500 hover:text-accent flex items-center gap-1"
+                    >
+                      View on GitHub <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                  {task.number && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCloseTask(task.number!); }}
+                      disabled={closingTask === task.number}
+                      className="text-xs text-dark-500 hover:text-red-400 flex items-center gap-1 transition-colors"
+                      title="Close task"
+                    >
+                      {closingTask === task.number ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                      Close
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

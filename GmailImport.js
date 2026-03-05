@@ -38,8 +38,9 @@ function importEmailsByDomain() {
     Logger.log(`Retrieved ${emails.length} new emails`);
     
     if (emails.length > 0) {
-      writeEmailsToSheet(emails);
-      updateLastSyncDate(new Date());
+      const added = writeEmailsToSheet(emails);
+      SpreadsheetApp.flush(); // Ensure writes complete before updating sync state
+      updateLastSyncDate(new Date(), added);
     }
     
     const duration = (new Date() - startTime) / 1000;
@@ -113,7 +114,7 @@ function getLastSyncDate() {
 /**
  * Update the last sync date
  */
-function updateLastSyncDate(date) {
+function updateLastSyncDate(date, addedCount) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   let syncSheet = spreadsheet.getSheetByName(EMAIL_SYNC_STATE_SHEET);
   
@@ -123,10 +124,7 @@ function updateLastSyncDate(date) {
     syncSheet.hideSheet();
   }
   
-  const emailSheet = spreadsheet.getSheetByName(EMAIL_SHEET_NAME);
-  const emailCount = emailSheet ? emailSheet.getLastRow() - 1 : 0;
-  
-  syncSheet.getRange(2, 1, 1, 2).setValues([[date, emailCount]]);
+  syncSheet.getRange(2, 1, 1, 2).setValues([[date, addedCount || 0]]);
 }
 
 /**
@@ -383,23 +381,24 @@ function writeEmailsToSheet(emails) {
   sheet.getRange(lastRow + 1, dateCol, rows.length, 1)
     .setNumberFormat('yyyy-mm-dd hh:mm:ss');
   
-  for (let i = 1; i <= 14; i++) {
-    sheet.autoResizeColumn(i);
-  }
-  
   Logger.log(`Added ${newEmails.length} new emails to sheet`);
+  return newEmails.length;
 }
 
 /**
  * Get existing message IDs to avoid duplicates
+ * Only reads column A (Message ID) for efficiency on large sheets
  */
 function getExistingMessageIds(sheet) {
-  const data = sheet.getDataRange().getValues();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return new Set();
+  
+  const idColumn = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
   const ids = new Set();
   
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0]) {
-      ids.add(data[i][0]);
+  for (let i = 0; i < idColumn.length; i++) {
+    if (idColumn[i][0]) {
+      ids.add(idColumn[i][0]);
     }
   }
   

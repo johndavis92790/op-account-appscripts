@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAccount } from '../hooks/useAccount';
 import { useGlobalNotes } from '../hooks/useGlobalNotes';
@@ -28,13 +28,19 @@ import {
   FileText,
   RefreshCw,
   Repeat,
+  ExternalLink,
+  Briefcase,
+  Hash,
+  Globe,
+  Check,
+  Loader2,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 export function AccountDashboard() {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
-  const { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes } = useAccount(accountId);
+  const { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes, updateEmailDomains } = useAccount(accountId);
   const { globalNotes, updateGlobalNotes } = useGlobalNotes();
 
   const futureMeetings = useMemo(
@@ -220,6 +226,21 @@ export function AccountDashboard() {
           label="Meeting Cadence"
           value={account.meetingCadence || 'Unknown'}
         />
+        <MetricCard
+          icon={<Hash className="w-4 h-4" />}
+          label="FY / FQ"
+          value={account.fiscalYear ? `FY${account.fiscalYear} Q${account.fiscalQuarter}` : '—'}
+        />
+        <MetricCard
+          icon={<DollarSign className="w-4 h-4" />}
+          label="Price Per Page"
+          value={account.pricePerPage ? `$${account.pricePerPage}` : '—'}
+        />
+        <MetricCard
+          icon={<Briefcase className="w-4 h-4" />}
+          label="Sales Engineer"
+          value={account.salesEngineer || '—'}
+        />
       </div>
 
       {/* Key Dates Row */}
@@ -236,6 +257,16 @@ export function AccountDashboard() {
           <Calendar className="w-3.5 h-3.5" />
           Next Meeting: <span className="text-dark-200 font-medium">{formatDate(account.nextMeetingDate)}</span>
         </span>
+        {account.linkToOpp && (
+          <a href={account.linkToOpp} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-accent hover:text-accent-hover">
+            <ExternalLink className="w-3 h-3" /> Opportunity
+          </a>
+        )}
+        {account.linkToAccount && (
+          <a href={account.linkToAccount} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-accent hover:text-accent-hover">
+            <ExternalLink className="w-3 h-3" /> Account
+          </a>
+        )}
         {account.lastSynced && (
           <span className="flex items-center gap-1.5 ml-auto text-dark-500">
             <RefreshCw className="w-3 h-3" />
@@ -243,6 +274,12 @@ export function AccountDashboard() {
           </span>
         )}
       </div>
+
+      {/* Email Domains */}
+      <EmailDomainsInline
+        domains={account.emailDomains || ''}
+        onSave={updateEmailDomains}
+      />
 
       {/* Main Content: Notes + Data Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -258,6 +295,7 @@ export function AccountDashboard() {
             lastSaved={account.successCriteria?.lastSaved || null}
             onSave={updateSuccessCriteria}
             accountName={account.accountName}
+            accountId={account.accountId}
           />
           <NotesEditor
             content={account.notes?.content || ''}
@@ -325,6 +363,57 @@ function MetricCard({
       >
         {value}
       </div>
+    </div>
+  );
+}
+
+function EmailDomainsInline({
+  domains,
+  onSave,
+}: {
+  domains: string;
+  onSave: (domains: string) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const isMissing = !domains || domains.trim() === '';
+
+  const handleChange = (value: string) => {
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    saveTimeout.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await onSave(value);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      } catch (err) {
+        console.error('Failed to save email domains:', err);
+      } finally {
+        setSaving(false);
+      }
+    }, 1200);
+  };
+
+  return (
+    <div className={`flex items-center gap-2 mb-6 text-xs px-1 ${isMissing ? 'py-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-3' : ''}`}>
+      <Globe className={`w-3.5 h-3.5 shrink-0 ${isMissing ? 'text-amber-400' : 'text-dark-500'}`} />
+      <span className={`shrink-0 ${isMissing ? 'text-amber-400 font-medium' : 'text-dark-400'}`}>
+        {isMissing ? 'Email Domains (required):' : 'Email Domains:'}
+      </span>
+      <input
+        type="text"
+        defaultValue={domains}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder="company.com, other.com"
+        className={`flex-1 bg-transparent border-b text-sm text-dark-200 py-0.5 focus:outline-none transition-colors ${
+          isMissing
+            ? 'border-amber-500/30 focus:border-amber-400 placeholder-amber-500/40'
+            : 'border-dark-700 focus:border-accent/50 placeholder-dark-600'
+        }`}
+      />
+      {saving && <Loader2 className="w-3 h-3 text-dark-500 animate-spin shrink-0" />}
+      {saved && !saving && <Check className="w-3 h-3 text-emerald-400 shrink-0" />}
     </div>
   );
 }

@@ -5,7 +5,6 @@ import { getScoreLevel } from '../types';
 import {
   Search,
   Calendar,
-  Clock,
   CheckCircle2,
   AlertTriangle,
   TrendingUp,
@@ -19,10 +18,14 @@ import {
   ArrowDown,
   Repeat,
   VideoOff,
+  CalendarDays,
+  Users,
+  Globe,
 } from 'lucide-react';
-import { format, parseISO, isPast, differenceInDays } from 'date-fns';
+import { format, parseISO, isPast, differenceInDays, isToday, isTomorrow } from 'date-fns';
 
-type SortKey = 'renewal' | 'score' | 'contact' | 'name' | 'renewable' | 'loginScore' | 'auditUsage' | 'journeyUsage' | 'tasks';
+type SortKey = 'renewal' | 'score' | 'contact' | 'name' | 'renewable' | 'loginScore' | 'auditUsage' | 'journeyUsage' | 'tasks' | 'pricePerPage';
+type MeetingFilter = '' | 'none' | 'today' | 'tomorrow';
 
 export function AccountList() {
   const { accounts, loading, error } = useAccounts();
@@ -30,11 +33,29 @@ export function AccountList() {
   const [sortBy, setSortBy] = useState<SortKey>('renewal');
   const [sortAsc, setSortAsc] = useState(true);
   const [aeFilter, setAeFilter] = useState<string>('');
-  const [noFutureMeetings, setNoFutureMeetings] = useState(false);
+  const [seFilter, setSeFilter] = useState<string>('');
+  const [fqFilter, setFqFilter] = useState<string>('');
+  const [fyFilter, setFyFilter] = useState<string>('');
+  const [meetingFilter, setMeetingFilter] = useState<MeetingFilter>('');
 
   const aeOptions = useMemo(() => {
     const aes = new Set(accounts.map((a) => a.ae).filter(Boolean));
     return Array.from(aes).sort();
+  }, [accounts]);
+
+  const seOptions = useMemo(() => {
+    const ses = new Set(accounts.map((a) => a.salesEngineer).filter(Boolean));
+    return Array.from(ses).sort();
+  }, [accounts]);
+
+  const fqOptions = useMemo(() => {
+    const fqs = new Set(accounts.map((a) => a.fiscalQuarter).filter(Boolean));
+    return Array.from(fqs).sort();
+  }, [accounts]);
+
+  const fyOptions = useMemo(() => {
+    const fys = new Set(accounts.map((a) => a.fiscalYear).filter(Boolean));
+    return Array.from(fys).sort();
   }, [accounts]);
 
   const handleSortClick = (key: SortKey) => {
@@ -42,62 +63,80 @@ export function AccountList() {
       setSortAsc(!sortAsc);
     } else {
       setSortBy(key);
-      // Default direction per sort type
       setSortAsc(['renewal', 'contact', 'name'].includes(key));
     }
   };
+
+  const handleMeetingFilterClick = (filter: MeetingFilter) => {
+    setMeetingFilter(meetingFilter === filter ? '' : filter);
+  };
+
+  const hasAnyFilter = aeFilter || seFilter || fqFilter || fyFilter || meetingFilter || search;
 
   const filtered = useMemo(() => {
     let list = accounts.filter((a) =>
       a.accountName.toLowerCase().includes(search.toLowerCase())
     );
 
-    if (aeFilter) {
-      list = list.filter((a) => a.ae === aeFilter);
-    }
+    if (aeFilter) list = list.filter((a) => a.ae === aeFilter);
+    if (seFilter) list = list.filter((a) => a.salesEngineer === seFilter);
+    if (fqFilter) list = list.filter((a) => a.fiscalQuarter === fqFilter);
+    if (fyFilter) list = list.filter((a) => a.fiscalYear === fyFilter);
 
-    if (noFutureMeetings) {
+    if (meetingFilter === 'none') {
       list = list.filter((a) => !a.nextMeetingDate && a.meetingsFuture === 0);
+    } else if (meetingFilter === 'today') {
+      list = list.filter((a) => {
+        if (!a.nextMeetingDate) return false;
+        try { return isToday(parseISO(a.nextMeetingDate)); } catch { return false; }
+      });
+    } else if (meetingFilter === 'tomorrow') {
+      list = list.filter((a) => {
+        if (!a.nextMeetingDate) return false;
+        try { return isTomorrow(parseISO(a.nextMeetingDate)); } catch { return false; }
+      });
     }
 
     list.sort((a, b) => {
       let cmp = 0;
       switch (sortBy) {
         case 'renewal':
-          cmp = (a.renewalDate || '9999').localeCompare(b.renewalDate || '9999');
-          break;
+          cmp = (a.renewalDate || '9999').localeCompare(b.renewalDate || '9999'); break;
         case 'score':
-          cmp = (b.engagementScore ?? 0) - (a.engagementScore ?? 0);
-          break;
+          cmp = (b.engagementScore ?? 0) - (a.engagementScore ?? 0); break;
         case 'contact':
-          cmp = (a.daysSinceLastContact ?? 999) - (b.daysSinceLastContact ?? 999);
-          break;
+          cmp = (a.daysSinceLastContact ?? 999) - (b.daysSinceLastContact ?? 999); break;
         case 'name':
-          cmp = a.accountName.localeCompare(b.accountName);
-          break;
+          cmp = a.accountName.localeCompare(b.accountName); break;
         case 'renewable':
-          cmp = (b.renewable ?? 0) - (a.renewable ?? 0);
-          break;
+          cmp = (b.renewable ?? 0) - (a.renewable ?? 0); break;
         case 'loginScore':
-          cmp = (b.loginScore ?? 0) - (a.loginScore ?? 0);
-          break;
+          cmp = (b.loginScore ?? 0) - (a.loginScore ?? 0); break;
         case 'auditUsage':
-          cmp = (b.auditUsage ?? 0) - (a.auditUsage ?? 0);
-          break;
+          cmp = (b.auditUsage ?? 0) - (a.auditUsage ?? 0); break;
         case 'journeyUsage':
-          cmp = (b.journeyUsage ?? 0) - (a.journeyUsage ?? 0);
-          break;
+          cmp = (b.journeyUsage ?? 0) - (a.journeyUsage ?? 0); break;
         case 'tasks':
-          cmp = (b.githubTasksOpen ?? 0) - (a.githubTasksOpen ?? 0);
-          break;
+          cmp = (b.githubTasksOpen ?? 0) - (a.githubTasksOpen ?? 0); break;
+        case 'pricePerPage':
+          cmp = (b.pricePerPage ?? 0) - (a.pricePerPage ?? 0); break;
       }
       return sortAsc ? cmp : -cmp;
     });
 
     return list;
-  }, [accounts, search, sortBy, sortAsc, aeFilter, noFutureMeetings]);
+  }, [accounts, search, sortBy, sortAsc, aeFilter, seFilter, fqFilter, fyFilter, meetingFilter]);
 
   const navigate = useNavigate();
+
+  const formatLastMeeting = (d: string | null) => {
+    if (!d) return null;
+    try {
+      const date = parseISO(d);
+      const days = differenceInDays(new Date(), date);
+      return { text: `${days}d ago`, days };
+    } catch { return null; }
+  };
 
   if (loading) {
     return (
@@ -121,45 +160,74 @@ export function AccountList() {
 
   return (
     <div className="p-4 sm:p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-dark-100 mb-1">Accounts</h1>
-        <p className="text-dark-400 text-sm">{accounts.length} active accounts</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-dark-100 mb-1">Accounts</h1>
+          <p className="text-dark-400 text-sm">{accounts.length} active accounts</p>
+        </div>
+        <button
+          onClick={() => navigate('/domains')}
+          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-dark-400 hover:text-dark-200 bg-dark-800 border border-dark-700 rounded-lg hover:border-dark-600 transition-colors"
+        >
+          <Globe className="w-3.5 h-3.5" />
+          Email Domains
+        </button>
       </div>
 
       <div className="flex flex-col gap-3 mb-6">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
+        {/* Row 1: Search + dropdowns */}
+        <div className="flex flex-col sm:flex-row gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
             <input
               type="text"
               placeholder="Search accounts..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-dark-800 border border-dark-700 rounded-lg pl-10 pr-4 py-2.5 text-sm text-dark-100 placeholder-dark-500 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/25 transition-colors"
+              className="w-full bg-dark-800 border border-dark-700 rounded-lg pl-10 pr-4 py-2 text-sm text-dark-100 placeholder-dark-500 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/25 transition-colors"
             />
           </div>
-          <select
-            value={aeFilter}
-            onChange={(e) => setAeFilter(e.target.value)}
-            className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2.5 text-sm text-dark-200 focus:outline-none focus:border-accent/50"
-          >
+          <select value={aeFilter} onChange={(e) => setAeFilter(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-xs text-dark-200 focus:outline-none focus:border-accent/50">
             <option value="">All AEs</option>
-            {aeOptions.map((ae) => (
-              <option key={ae} value={ae}>{ae}</option>
-            ))}
+            {aeOptions.map((ae) => (<option key={ae} value={ae}>{ae}</option>))}
           </select>
-          <button
-            onClick={() => setNoFutureMeetings(!noFutureMeetings)}
-            className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
-              noFutureMeetings
-                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                : 'bg-dark-800 text-dark-400 border border-dark-700 hover:text-dark-200'
-            }`}
-          >
-            <Video className="w-3.5 h-3.5" />
-            No Meetings
-          </button>
+          <select value={seFilter} onChange={(e) => setSeFilter(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-xs text-dark-200 focus:outline-none focus:border-accent/50">
+            <option value="">All SEs</option>
+            {seOptions.map((se) => (<option key={se} value={se}>{se}</option>))}
+          </select>
+          <select value={fyFilter} onChange={(e) => setFyFilter(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-xs text-dark-200 focus:outline-none focus:border-accent/50">
+            <option value="">All FY</option>
+            {fyOptions.map((fy) => (<option key={fy} value={fy}>FY{fy}</option>))}
+          </select>
+          <select value={fqFilter} onChange={(e) => setFqFilter(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-xs text-dark-200 focus:outline-none focus:border-accent/50">
+            <option value="">All FQ</option>
+            {fqOptions.map((fq) => (<option key={fq} value={fq}>Q{fq}</option>))}
+          </select>
         </div>
+
+        {/* Row 2: Meeting filter buttons */}
+        <div className="flex gap-1.5 flex-wrap">
+          {([
+            { key: 'today', label: 'Meetings Today', icon: CalendarDays },
+            { key: 'tomorrow', label: 'Meetings Tomorrow', icon: CalendarDays },
+            { key: 'none', label: 'No Meetings', icon: VideoOff },
+          ] as const).map((opt) => (
+            <button
+              key={opt.key}
+              onClick={() => handleMeetingFilterClick(opt.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                meetingFilter === opt.key
+                  ? 'bg-accent/20 text-accent border border-accent/30'
+                  : 'bg-dark-800 text-dark-400 border border-dark-700 hover:text-dark-200'
+              }`}
+            >
+              <opt.icon className="w-3.5 h-3.5" />
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Row 3: Sort buttons */}
         <div className="flex gap-1.5 flex-wrap">
           {[
             { key: 'renewal', label: 'Renewal' },
@@ -171,6 +239,7 @@ export function AccountList() {
             { key: 'auditUsage', label: 'Audit' },
             { key: 'journeyUsage', label: 'Journey' },
             { key: 'tasks', label: 'Tasks' },
+            { key: 'pricePerPage', label: '$/Page' },
           ].map((opt) => (
             <button
               key={opt.key}
@@ -187,12 +256,12 @@ export function AccountList() {
               )}
             </button>
           ))}
-          {(aeFilter || noFutureMeetings || search) && (
+          {hasAnyFilter && (
             <button
-              onClick={() => { setAeFilter(''); setNoFutureMeetings(false); setSearch(''); }}
+              onClick={() => { setAeFilter(''); setSeFilter(''); setFqFilter(''); setFyFilter(''); setMeetingFilter(''); setSearch(''); }}
               className="px-3 py-1.5 text-xs text-dark-500 hover:text-dark-300 flex items-center gap-1"
             >
-              <X className="w-3 h-3" /> Clear filters
+              <X className="w-3 h-3" /> Clear all
             </button>
           )}
         </div>
@@ -204,6 +273,7 @@ export function AccountList() {
           const renewalDate = account.renewalDate ? parseISO(account.renewalDate) : null;
           const daysToRenewal = renewalDate ? differenceInDays(renewalDate, new Date()) : null;
           const isOverdue = renewalDate ? isPast(renewalDate) : false;
+          const lastMtg = formatLastMeeting(account.lastMeetingDate);
 
           return (
             <button
@@ -231,7 +301,6 @@ export function AccountList() {
 
               {/* Row 2: Always-visible metrics in fixed 2-col grid */}
               <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs mb-2">
-                {/* Renewable Amount - always slot 1 */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-dark-500 uppercase tracking-wider">Amount</span>
                   <span className="text-dark-300 flex items-center gap-1">
@@ -240,21 +309,16 @@ export function AccountList() {
                   </span>
                 </div>
 
-                {/* Renewal Date - always slot 2 */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-dark-500 uppercase tracking-wider">Renewal Date</span>
                   <span className={`flex items-center gap-1 ${isOverdue ? 'text-red-400' : daysToRenewal !== null && daysToRenewal < 30 ? 'text-amber-400' : 'text-dark-300'}`}>
                     <Calendar className="w-3 h-3" />
                     {renewalDate ? (
-                      <>
-                        {format(renewalDate, 'MMM d, yyyy')}
-                        <span className="text-dark-500 ml-0.5">({isOverdue ? 'overdue' : `${daysToRenewal}d`})</span>
-                      </>
+                      <>{format(renewalDate, 'MMM d, yyyy')}<span className="text-dark-500 ml-0.5">({isOverdue ? 'overdue' : `${daysToRenewal}d`})</span></>
                     ) : '—'}
                   </span>
                 </div>
 
-                {/* Login Score - always slot 3 */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-dark-500 uppercase tracking-wider">Login</span>
                   <span className="text-dark-300 flex items-center gap-1">
@@ -263,7 +327,6 @@ export function AccountList() {
                   </span>
                 </div>
 
-                {/* Audit Usage - always slot 4 */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-dark-500 uppercase tracking-wider">Audit</span>
                   <span className="text-dark-300 flex items-center gap-1">
@@ -272,7 +335,6 @@ export function AccountList() {
                   </span>
                 </div>
 
-                {/* Journey Usage - always slot 5 */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-dark-500 uppercase tracking-wider">Journey</span>
                   <span className="text-dark-300 flex items-center gap-1">
@@ -281,22 +343,16 @@ export function AccountList() {
                   </span>
                 </div>
 
-                {/* Last Contact - always slot 6 */}
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Last Contact</span>
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Last Meeting</span>
                   <span className={`flex items-center gap-1 ${
-                    account.daysSinceLastContact != null && account.daysSinceLastContact > 30
-                      ? 'text-red-400'
-                      : account.daysSinceLastContact != null && account.daysSinceLastContact > 14
-                      ? 'text-amber-400'
-                      : 'text-dark-300'
+                    lastMtg && lastMtg.days > 30 ? 'text-red-400' : lastMtg && lastMtg.days > 14 ? 'text-amber-400' : 'text-dark-300'
                   }`}>
-                    <Clock className="w-3 h-3" />
-                    {account.daysSinceLastContact != null ? `${account.daysSinceLastContact}d ago` : '—'}
+                    <Video className="w-3 h-3" />
+                    {lastMtg ? lastMtg.text : '—'}
                   </span>
                 </div>
 
-                {/* Next Meeting - always slot 7 */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-dark-500 uppercase tracking-wider">Next Meeting</span>
                   {account.nextMeetingDate ? (
@@ -312,7 +368,6 @@ export function AccountList() {
                   )}
                 </div>
 
-                {/* Tasks - always slot 8 */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-dark-500 uppercase tracking-wider">Tasks</span>
                   <span className="text-dark-300 flex items-center gap-1">
@@ -322,24 +377,33 @@ export function AccountList() {
                 </div>
               </div>
 
-              {/* Row 3: Status bar with cadence */}
-              <div className="flex items-center gap-2 text-xs text-dark-500">
+              {/* Row 3: Status bar with FQ/FY, SE, cadence */}
+              <div className="flex items-center gap-2 text-xs text-dark-500 flex-wrap">
                 {account.status && (
                   <span className="flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3" />
                     {account.status}
                   </span>
                 )}
-                {account.ae && (
+                {account.salesEngineer && (
                   <>
                     <span className="text-dark-700">·</span>
-                    <span>{account.ae}</span>
+                    <span className="flex items-center gap-0.5">
+                      <Users className="w-3 h-3" />
+                      {account.salesEngineer}
+                    </span>
                   </>
                 )}
                 {account.stage && (
                   <>
                     <span className="text-dark-700">·</span>
                     <span className="truncate">{account.stage}</span>
+                  </>
+                )}
+                {(account.fiscalYear || account.fiscalQuarter) && (
+                  <>
+                    <span className="text-dark-700">·</span>
+                    <span>FY{account.fiscalYear} Q{account.fiscalQuarter}</span>
                   </>
                 )}
                 {account.meetingCadence && (

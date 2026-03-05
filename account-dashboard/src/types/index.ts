@@ -19,6 +19,14 @@ export interface Account {
   // People
   csm: string;
   ae: string;
+  salesEngineer: string;
+
+  // Opportunity / Fiscal
+  fiscalQuarter: string;
+  fiscalYear: string;
+  pricePerPage: number;
+  linkToOpp: string;
+  linkToAccount: string;
 
   // Engagement metrics
   engagementScore: number;
@@ -64,6 +72,9 @@ export interface Account {
   // Meeting cadence
   meetingCadence: string;
 
+  // Email domain mapping
+  emailDomains: string;
+
   // Metadata
   lastSynced: string;
 }
@@ -87,6 +98,12 @@ export interface AccountListItem {
   journeyUsage: number;
   meetingsFuture: number;
   meetingCadence: string;
+  lastMeetingDate: string | null;
+  fiscalQuarter: string;
+  fiscalYear: string;
+  pricePerPage: number;
+  salesEngineer: string;
+  emailDomains: string;
 }
 
 export interface Task {

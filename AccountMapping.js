@@ -289,9 +289,10 @@ function buildDomainToAccountMap() {
 }
 
 /**
- * Update the account mapping sheet with accounts from Accounts Card Report
- * Only includes accounts with active opportunities in Renewal Opportunities
- * Preserves existing email domain mappings
+ * Update the account mapping sheet with accounts from Accounts Card Report.
+ * IMPORTANT: NEVER clears or removes existing rows. Only APPENDS new accounts
+ * that don't already exist in the sheet. Existing rows (including inactive
+ * accounts and manually maintained email domains) are always preserved.
  */
 function updateAccountMapping() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
@@ -311,54 +312,46 @@ function updateAccountMapping() {
     Logger.log('Created new account mapping sheet');
   }
   
-  // Get existing mappings to preserve email domains
+  // Build set of existing account IDs (NEVER remove these)
   const existingData = mappingSheet.getDataRange().getValues();
-  const existingMappings = new Map();
+  const existingAccountIds = new Set();
   
   for (let i = 1; i < existingData.length; i++) {
-    const accountId = existingData[i][0];
-    const domains = existingData[i][2];
+    const accountId = String(existingData[i][0] || '').trim();
     if (accountId) {
-      existingMappings.set(accountId, domains || '');
+      existingAccountIds.add(accountId);
     }
   }
   
-  // Get active accounts
+  Logger.log(`Existing mapping sheet has ${existingAccountIds.size} accounts`);
+  
+  // Get active accounts from Accounts Card Report
   const accountMap = buildAccountMap();
   
-  // Build new mapping data
-  const newMappingData = [['Account ID', 'Account Name', 'Email Domains']];
-  
+  // Find new accounts that need to be added (append only)
+  const newRows = [];
   for (const [accountId, accountInfo] of accountMap) {
-    const existingDomains = existingMappings.get(accountId) || '';
-    newMappingData.push([accountId, accountInfo.accountName, existingDomains]);
-  }
-  
-  // Sort by account name
-  const dataRows = newMappingData.slice(1);
-  dataRows.sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
-  
-  // Write to sheet
-  mappingSheet.clear();
-  
-  if (newMappingData.length > 0) {
-    const finalData = [newMappingData[0], ...dataRows];
-    mappingSheet.getRange(1, 1, finalData.length, 3).setValues(finalData);
-    
-    mappingSheet.getRange(1, 1, 1, 3)
-      .setFontWeight('bold')
-      .setBackground('#f4b400')
-      .setFontColor('#ffffff');
-    
-    mappingSheet.setFrozenRows(1);
-    
-    if (finalData.length > 1) {
-      const domainsRange = mappingSheet.getRange(2, 3, finalData.length - 1, 1);
-      domainsRange.setNote('Enter email domains (e.g., company.com, example.org) separated by commas');
+    if (!existingAccountIds.has(accountId)) {
+      newRows.push([accountId, accountInfo.accountName, '']);
     }
   }
   
-  Logger.log(`Updated account mapping sheet with ${accountMap.size} accounts`);
+  // Sort new rows by account name
+  newRows.sort((a, b) => (a[1] || '').localeCompare(b[1] || ''));
+  
+  // Append new rows (NEVER clear or overwrite existing data)
+  if (newRows.length > 0) {
+    const nextRow = mappingSheet.getLastRow() + 1;
+    mappingSheet.getRange(nextRow, 1, newRows.length, 3).setValues(newRows);
+    
+    // Add helper note to new empty domain cells
+    const domainsRange = mappingSheet.getRange(nextRow, 3, newRows.length, 1);
+    domainsRange.setNote('Enter email domains (e.g., company.com, example.org) separated by commas');
+    
+    Logger.log(`Appended ${newRows.length} new accounts to mapping sheet`);
+  } else {
+    Logger.log('No new accounts to add to mapping sheet');
+  }
 }
 
 /**

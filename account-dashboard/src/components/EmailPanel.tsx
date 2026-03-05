@@ -48,8 +48,10 @@ export function EmailPanel({ emails }: EmailPanelProps) {
               dateStr = email.date || '';
             }
 
-            const gmailUrl = email.messageId
-              ? `https://mail.google.com/mail/u/0/#search/rfc822msgid%3A${encodeURIComponent(email.messageId)}`
+            const gmailUrl = email.threadId
+              ? `https://mail.google.com/mail/u/0/#inbox/${email.threadId}`
+              : email.subject
+              ? `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(email.subject)}`
               : undefined;
 
             return (

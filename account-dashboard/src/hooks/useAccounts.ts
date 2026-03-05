@@ -35,6 +35,12 @@ export function useAccounts() {
             journeyUsage: d.journeyUsage ?? 0,
             meetingsFuture: d.meetingsFuture ?? 0,
             meetingCadence: d.meetingCadence || '',
+            lastMeetingDate: d.lastMeetingDate || null,
+            fiscalQuarter: d.fiscalQuarter || '',
+            fiscalYear: d.fiscalYear || '',
+            pricePerPage: d.pricePerPage ?? 0,
+            salesEngineer: d.salesEngineer || '',
+            emailDomains: d.emailDomains || '',
           };
         });
         setAccounts(items);

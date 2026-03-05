@@ -50,6 +50,13 @@ function syncToFirestore() {
     // Step 4: Sync notes from Firestore back to sheet (bidirectional)
     syncNotesFromFirestore(spreadsheet, accountIdMap);
     
+    // Step 4.5: Sync email domains from Firestore back to mapping sheet (bidirectional)
+    syncEmailDomainsFromFirestore(spreadsheet, accountIdMap);
+    
+    // Reload sources after bidirectional syncs may have updated sheets
+    const updatedSources = loadSourceTablesForSync(spreadsheet);
+    Object.assign(sources, updatedSources);
+    
     // Step 5: Build and push each account document to Firestore
     let synced = 0;
     let errors = 0;
@@ -76,6 +83,35 @@ function syncToFirestore() {
       
       // Rate limit to avoid quota issues
       if (i % 10 === 0) Utilities.sleep(100);
+    }
+    
+    // Step 6: Sync current fiscal period to settings doc
+    try {
+      const fqIdx = rawHeaders.indexOf('Current Fiscal Quarter');
+      const fyIdx = rawHeaders.indexOf('Current Fiscal Year');
+      if (fqIdx !== -1 && fyIdx !== -1 && rawData.length > 1) {
+        // Grab from first account row (same for all accounts)
+        let currentFQ = '', currentFY = '';
+        for (let i = 1; i < rawData.length; i++) {
+          const fq = rawData[i][fqIdx];
+          const fy = rawData[i][fyIdx];
+          if (fq && fy) {
+            currentFQ = String(fq);
+            currentFY = String(fy);
+            break;
+          }
+        }
+        if (currentFQ && currentFY) {
+          writeFirestoreDocument('settings', 'fiscal_period', {
+            currentFiscalQuarter: currentFQ,
+            currentFiscalYear: currentFY,
+            lastUpdated: new Date().toISOString(),
+          });
+          Logger.log(`Synced fiscal period: FY${currentFY} Q${currentFQ}`);
+        }
+      }
+    } catch (fpErr) {
+      Logger.log('Warning: Failed to sync fiscal period: ' + fpErr.message);
     }
     
     const duration = (new Date() - startTime) / 1000;
@@ -129,6 +165,7 @@ function loadSourceTablesForSync(spreadsheet) {
     actionItems: loadSheet('Meeting Action Items'),
     notesStorage: loadSheet('Notes Storage'),
     accountContacts: loadSheet('Account Contacts'),
+    emailDomainMapping: loadSheet('Accounts to Email Domains Mapping'),
   };
 }
 
@@ -174,6 +211,9 @@ function buildFirestoreDocument(row, headers, accountId, accountName, sources) {
   // Calculate meeting cadence from past meetings
   const meetingCadence = calculateMeetingCadence(meetings);
   
+  // Get email domains from mapping sheet
+  const emailDomains = getEmailDomainsForAccount(accountId, sources.emailDomainMapping);
+  
   return {
     accountId: accountId,
     accountName: accountName,
@@ -189,6 +229,12 @@ function buildFirestoreDocument(row, headers, accountId, accountName, sources) {
     forecast: String(col('Forecast') || ''),
     csm: String(col('CSM') || ''),
     ae: String(col('AE') || ''),
+    salesEngineer: String(col('Sales Engineer') || ''),
+    fiscalQuarter: String(col('Fiscal Quarter') || ''),
+    fiscalYear: String(col('Fiscal Year') || ''),
+    pricePerPage: toNum(col('Price Per Page')),
+    linkToOpp: String(col('Link to Opp') || ''),
+    linkToAccount: String(col('Link to Account') || ''),
     engagementScore: toNum(col('Engagement Score')),
     daysSinceLastContact: col('Days Since Last Contact') !== null && col('Days Since Last Contact') !== '' ? toNum(col('Days Since Last Contact')) : null,
     lastEmailDate: toDateStr(col('Last Email Date')),
@@ -215,6 +261,7 @@ function buildFirestoreDocument(row, headers, accountId, accountName, sources) {
     notes: notes,
     contacts: contacts,
     meetingCadence: meetingCadence,
+    emailDomains: emailDomains,
     manualTasks: [], // preserved from Firestore, not overwritten
     lastSynced: new Date().toISOString(),
   };
@@ -277,6 +324,7 @@ function resolveEmailsForAccount(accountId, emailComms) {
   const h = emailComms.headers;
   const accountIdIdx = h.indexOf('Account ID');
   const messageIdIdx = h.indexOf('Message ID');
+  const threadIdIdx = h.indexOf('Thread ID');
   const dateIdx = h.indexOf('Date');
   const fromIdx = h.indexOf('From');
   const fromDomainIdx = h.indexOf('From Domain');
@@ -307,6 +355,7 @@ function resolveEmailsForAccount(accountId, emailComms) {
     const isOutbound = fromDomain.includes('observepoint.com');
     return {
       messageId: String(r[messageIdIdx] || ''),
+      threadId: threadIdIdx !== -1 ? String(r[threadIdIdx] || '') : '',
       date: r[dateIdx] ? (r[dateIdx] instanceof Date ? r[dateIdx].toISOString() : String(r[dateIdx])) : '',
       from: String(r[fromIdx] || ''),
       fromDomain: fromDomain,
@@ -556,6 +605,25 @@ function calculateMeetingCadence(meetings) {
 }
 
 /**
+ * Get email domains for an account from the mapping sheet
+ */
+function getEmailDomainsForAccount(accountId, emailDomainMapping) {
+  if (!emailDomainMapping.headers.length) return '';
+  
+  const h = emailDomainMapping.headers;
+  const aidIdx = h.indexOf('Account ID');
+  const domainsIdx = h.indexOf('Email Domains');
+  
+  for (const r of emailDomainMapping.rows) {
+    if (String(r[aidIdx] || '').trim() === accountId) {
+      return String(r[domainsIdx] || '');
+    }
+  }
+  
+  return '';
+}
+
+/**
  * Get notes for an account from Notes Storage sheet
  */
 function getNotesForAccount(accountId, notesStorage) {
@@ -670,6 +738,79 @@ function syncNotesFromFirestore(spreadsheet, accountIdMap) {
   }
 }
 
+/**
+ * Sync email domains FROM Firestore back to the mapping sheet (bidirectional).
+ * If the webapp edited email domains (emailDomainsSource = 'webapp'), update the sheet.
+ */
+function syncEmailDomainsFromFirestore(spreadsheet, accountIdMap) {
+  Logger.log('Checking Firestore for webapp-edited email domains...');
+  
+  const token = ScriptApp.getOAuthToken();
+  const mappingSheet = spreadsheet.getSheetByName('Accounts to Email Domains Mapping');
+  if (!mappingSheet) {
+    Logger.log('No email domains mapping sheet found');
+    return;
+  }
+  
+  const mappingData = mappingSheet.getDataRange().getValues();
+  const mappingHeaders = mappingData[0];
+  const aidIdx = mappingHeaders.indexOf('Account ID');
+  const domainsIdx = mappingHeaders.indexOf('Email Domains');
+  
+  // Build sheet map: accountId -> rowIndex
+  const sheetMap = new Map();
+  for (let i = 1; i < mappingData.length; i++) {
+    const aid = String(mappingData[i][aidIdx] || '').trim();
+    if (aid) {
+      sheetMap.set(aid, i + 1); // 1-indexed row
+    }
+  }
+  
+  let updated = 0;
+  for (const [accountName, accountId] of accountIdMap) {
+    try {
+      const fsDoc = readFirestoreDocument('accounts', accountId, token);
+      if (!fsDoc || !fsDoc.fields) continue;
+      
+      const fsSource = fsDoc.fields.emailDomainsSource ? fsDoc.fields.emailDomainsSource.stringValue : '';
+      if (fsSource !== 'webapp') continue;
+      
+      const fsDomains = fsDoc.fields.emailDomains ? fsDoc.fields.emailDomains.stringValue : '';
+      
+      const rowNum = sheetMap.get(accountId);
+      if (rowNum) {
+        // Update existing row
+        mappingSheet.getRange(rowNum, domainsIdx + 1).setValue(fsDomains);
+      } else {
+        // Add new row (account wasn't in the mapping sheet yet)
+        mappingSheet.appendRow([accountId, accountName, fsDomains]);
+      }
+      updated++;
+      Logger.log(`✓ Synced email domains from webapp for: ${accountName}`);
+      
+      // Clear the source flag
+      const clearUrl = FIRESTORE_BASE_URL + '/accounts/' + accountId + '?updateMask.fieldPaths=emailDomainsSource&currentDocument.exists=true';
+      UrlFetchApp.fetch(clearUrl, {
+        method: 'patch',
+        contentType: 'application/json',
+        headers: { 'Authorization': 'Bearer ' + token },
+        payload: JSON.stringify({
+          fields: {
+            emailDomainsSource: { stringValue: 'synced' }
+          }
+        }),
+        muteHttpExceptions: true,
+      });
+    } catch (err) {
+      // Silently skip
+    }
+  }
+  
+  if (updated > 0) {
+    Logger.log(`Synced ${updated} email domains from webapp back to sheet`);
+  }
+}
+
 // === Firestore REST API Helpers ===
 
 /**
@@ -726,6 +867,8 @@ function convertToFirestoreFields(obj) {
     if (key === 'manualTasks') continue;
     if (key === 'successCriteria') continue;
     if (key === 'contactsSource') continue;
+    if (key === 'emailDomainsSource') continue;
+    if (key === 'emailDomainsLastSaved') continue;
     
     fields[key] = convertToFirestoreValue(value);
   }

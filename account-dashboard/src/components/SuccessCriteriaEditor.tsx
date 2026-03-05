@@ -18,6 +18,7 @@ import {
   Maximize2,
   Minimize2,
   X,
+  ExternalLink,
 } from 'lucide-react';
 
 interface SuccessCriteriaEditorProps {
@@ -25,9 +26,10 @@ interface SuccessCriteriaEditorProps {
   lastSaved: string | null;
   onSave: (content: string) => Promise<void>;
   accountName: string;
+  accountId?: string;
 }
 
-export function SuccessCriteriaEditor({ content, lastSaved, onSave, accountName }: SuccessCriteriaEditorProps) {
+export function SuccessCriteriaEditor({ content, lastSaved, onSave, accountName, accountId }: SuccessCriteriaEditorProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -187,9 +189,18 @@ export function SuccessCriteriaEditor({ content, lastSaved, onSave, accountName 
             Last saved: {new Date(lastSaved).toLocaleString()}
           </span>
         )}
+        {accountId && (
+          <button
+            onClick={() => window.open(`/account/${accountId}/success-criteria`, '_blank')}
+            className="p-1.5 rounded text-dark-400 hover:text-dark-200 hover:bg-dark-700 transition-colors ml-2"
+            title="Open in new tab"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </button>
+        )}
         <button
           onClick={() => setFullscreen(!fullscreen)}
-          className="p-1.5 rounded text-dark-400 hover:text-dark-200 hover:bg-dark-700 transition-colors ml-2"
+          className="p-1.5 rounded text-dark-400 hover:text-dark-200 hover:bg-dark-700 transition-colors"
           title={isFullscreen ? 'Exit fullscreen' : 'Present fullscreen'}
         >
           {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}

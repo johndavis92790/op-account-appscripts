@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { AccountList } from './components/AccountList';
 import { AccountDashboard } from './components/AccountDashboard';
+import { SuccessCriteriaPage } from './components/SuccessCriteriaPage';
+import { EmailDomainsPage } from './components/EmailDomainsPage';
 import { LoginPage } from './components/LoginPage';
 import { BarChart3 } from 'lucide-react';
 
@@ -51,6 +53,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<AccountList />} />
           <Route path="/account/:accountId" element={<AccountDashboard />} />
+          <Route path="/account/:accountId/success-criteria" element={<SuccessCriteriaPage />} />
+          <Route path="/domains" element={<EmailDomainsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

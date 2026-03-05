@@ -164,17 +164,12 @@ function buildConsolidatedData(sourceData) {
     'Fiscal Year',
     'Previous Opportunity',
     'Price Per Page',
-    'Service End Date',
-    'Service Start Date',
     'Success Criteria',
-    'Why OP Win',
-    'Why We Lost',
     'Sales Engineer',
     'Link to Opp',
     'Link to Account',
     'Current Fiscal Year',
     'Current Fiscal Quarter',
-    'CSM Activity Needed',
     // Engagement metrics
     'Engagement Score',
     'Days Since Last Contact',
@@ -293,17 +288,12 @@ function buildConsolidatedData(sourceData) {
       opptysDetails.fiscalYear || '',
       opptysDetails.previousOpp || '',
       opptysDetails.pricePerPage || '',
-      opptysDetails.serviceEndDate || '',
-      opptysDetails.serviceStartDate || '',
       opptysDetails.successCriteria || '',
-      opptysDetails.whyOpWin || '',
-      opptysDetails.whyWeLost || '',
       opptysDetails.salesEngineer || '',
       opptysDetails.linkToOpp || '',
       opptysDetails.linkToAccount || '',
       opptysDetails.currentFiscalYear || '',
       opptysDetails.currentFiscalQuarter || '',
-      opptysDetails.csmActivityNeeded || '',
       // Engagement metrics
       metrics.engagementScore,
       metrics.daysSinceLastContact !== null ? metrics.daysSinceLastContact : '',
@@ -427,17 +417,12 @@ function buildOpptysDetailMap(opptys) {
   const fiscalYearIdx = headers.indexOf('FiscalYear');
   const previousOppIdx = headers.indexOf('Previous_Opportunity__c');
   const pricePerPageIdx = headers.indexOf('Price_Per_Page__c');
-  const serviceEndDateIdx = headers.indexOf('Service_End_Date__c');
-  const serviceStartDateIdx = headers.indexOf('Service_Start_Date__c');
   const successCriteriaIdx = headers.indexOf('Success_Criteria__c');
-  const whyOpWinIdx = headers.indexOf('Why_OP_Win_Details__c');
-  const whyWeLostIdx = headers.indexOf('Why_We_Lost__c');
   const salesEngineerIdx = headers.indexOf('sales_engineer_name');
   const linkToOppIdx = headers.indexOf('link_to_opp');
   const linkToAccountIdx = headers.indexOf('link_to_account');
   const currentFiscalYearIdx = headers.indexOf('current_fiscal_year');
   const currentFiscalQuarterIdx = headers.indexOf('current_fiscal_quarter');
-  const csmActivityNeededIdx = headers.indexOf('csm_activity_needed');
   
   for (let i = 1; i < opptys.data.length; i++) {
     const row = opptys.data[i];
@@ -449,17 +434,12 @@ function buildOpptysDetailMap(opptys) {
         fiscalYear: fiscalYearIdx !== -1 ? row[fiscalYearIdx] : '',
         previousOpp: previousOppIdx !== -1 ? row[previousOppIdx] : '',
         pricePerPage: pricePerPageIdx !== -1 ? row[pricePerPageIdx] : '',
-        serviceEndDate: serviceEndDateIdx !== -1 ? row[serviceEndDateIdx] : '',
-        serviceStartDate: serviceStartDateIdx !== -1 ? row[serviceStartDateIdx] : '',
         successCriteria: successCriteriaIdx !== -1 ? row[successCriteriaIdx] : '',
-        whyOpWin: whyOpWinIdx !== -1 ? row[whyOpWinIdx] : '',
-        whyWeLost: whyWeLostIdx !== -1 ? row[whyWeLostIdx] : '',
         salesEngineer: salesEngineerIdx !== -1 ? row[salesEngineerIdx] : '',
         linkToOpp: linkToOppIdx !== -1 ? row[linkToOppIdx] : '',
         linkToAccount: linkToAccountIdx !== -1 ? row[linkToAccountIdx] : '',
-        currentFiscalYear: currentFiscalYearIdx !== -1 ? row[currentFiscalYearIdx] : '',
-        currentFiscalQuarter: currentFiscalQuarterIdx !== -1 ? row[currentFiscalQuarterIdx] : '',
-        csmActivityNeeded: csmActivityNeededIdx !== -1 ? row[csmActivityNeededIdx] : ''
+        currentFiscalYear: currentFiscalYearIdx !== -1 ? parseFloat(row[currentFiscalYearIdx]) || row[currentFiscalYearIdx] || '' : '',
+        currentFiscalQuarter: currentFiscalQuarterIdx !== -1 ? parseFloat(row[currentFiscalQuarterIdx]) || row[currentFiscalQuarterIdx] || '' : ''
       });
     }
   }

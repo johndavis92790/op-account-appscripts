@@ -35,6 +35,12 @@ export function useAccount(accountId: string | undefined) {
             forecast: d.forecast || '',
             csm: d.csm || '',
             ae: d.ae || '',
+            salesEngineer: d.salesEngineer || '',
+            fiscalQuarter: d.fiscalQuarter || '',
+            fiscalYear: d.fiscalYear || '',
+            pricePerPage: d.pricePerPage ?? 0,
+            linkToOpp: d.linkToOpp || '',
+            linkToAccount: d.linkToAccount || '',
             engagementScore: d.engagementScore ?? 0,
             daysSinceLastContact: d.daysSinceLastContact ?? null,
             lastEmailDate: d.lastEmailDate || null,
@@ -63,6 +69,7 @@ export function useAccount(accountId: string | undefined) {
             contacts: d.contacts || [],
             manualTasks: d.manualTasks || [],
             meetingCadence: d.meetingCadence || '',
+            emailDomains: d.emailDomains || '',
             lastSynced: d.lastSynced || '',
           } as Account);
         } else {
@@ -112,5 +119,15 @@ export function useAccount(accountId: string | undefined) {
     });
   };
 
-  return { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes };
+  const updateEmailDomains = async (domains: string) => {
+    if (!accountId) return;
+    const docRef = doc(db, 'accounts', accountId);
+    await updateDoc(docRef, {
+      emailDomains: domains,
+      emailDomainsSource: 'webapp',
+      emailDomainsLastSaved: new Date().toISOString(),
+    });
+  };
+
+  return { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes, updateEmailDomains };
 }
