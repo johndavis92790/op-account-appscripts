@@ -126,6 +126,7 @@ function buildConsolidatedData(sourceData) {
   // Build lookup maps
   const renewalOpportunityMap = buildRenewalOpportunityMap(sourceData.renewals);
   const oppIdToNameMap = buildOppIdToNameMap(sourceData.opptys);
+  const opptysDetailMap = buildOpptysDetailMap(sourceData.opptys);
   const renewalDetailMap = buildRenewalDetailMap(sourceData.renewals);
   const githubByAccountMap = buildGitHubByAccountMap(sourceData.github);
   const emailsByAccountMap = buildEmailsByAccountMap(sourceData.emails);
@@ -158,6 +159,22 @@ function buildConsolidatedData(sourceData) {
     'CSM',
     'AE',
     'Support Type',
+    // New Opptys Report columns
+    'Fiscal Quarter',
+    'Fiscal Year',
+    'Previous Opportunity',
+    'Price Per Page',
+    'Service End Date',
+    'Service Start Date',
+    'Success Criteria',
+    'Why OP Win',
+    'Why We Lost',
+    'Sales Engineer',
+    'Link to Opp',
+    'Link to Account',
+    'Current Fiscal Year',
+    'Current Fiscal Quarter',
+    'CSM Activity Needed',
     // Engagement metrics
     'Engagement Score',
     'Days Since Last Contact',
@@ -198,6 +215,10 @@ function buildConsolidatedData(sourceData) {
   
   const rows = [headers];
   
+  let skippedNoOppName = 0;
+  let skippedNotInRenewal = 0;
+  let processed = 0;
+  
   // Process only ACTIVE accounts (those in Renewal Opportunities)
   for (let i = 1; i < sourceData.accounts.data.length; i++) {
     const accountRow = sourceData.accounts.data[i];
@@ -207,13 +228,25 @@ function buildConsolidatedData(sourceData) {
     const autoRenewal = accountRow[autoRenewalIdx];
     
     // Only include accounts with opportunities in Renewal Opportunities sheet
-    const oppName = oppIdToNameMap.get(nextRenewalOppId);
-    if (!oppName || !renewalOpportunityMap.has(oppName)) {
+    if (!nextRenewalOppId) {
+      skippedNoOppName++;
+      continue;
+    }
+    if (!renewalOpportunityMap.has(nextRenewalOppId)) {
+      if (skippedNotInRenewal < 5) {
+        const oppName = oppIdToNameMap.get(nextRenewalOppId) || 'unknown';
+        Logger.log(`Skipping account "${accountName}" - opp ID "${nextRenewalOppId}" (${oppName}) not in renewalOpportunityMap`);
+      }
+      skippedNotInRenewal++;
       continue; // Skip inactive accounts
     }
     
-    const renewalLink = renewalOpportunityMap.get(oppName);
-    const renewalDetails = renewalDetailMap.get(oppName) || {};
+    processed++;
+    
+    const oppName = oppIdToNameMap.get(nextRenewalOppId);
+    const renewalLink = renewalOpportunityMap.get(nextRenewalOppId);
+    const renewalDetails = renewalDetailMap.get(nextRenewalOppId) || {};
+    const opptysDetails = opptysDetailMap.get(oppName) || {};
     
     // Get aggregated data
     const tasks = githubByAccountMap.get(accountId) || [];
@@ -255,6 +288,22 @@ function buildConsolidatedData(sourceData) {
       renewalDetails.csm || '',
       renewalDetails.ae || '',
       renewalDetails.supportType || '',
+      // New Opptys Report columns
+      opptysDetails.fiscalQuarter || '',
+      opptysDetails.fiscalYear || '',
+      opptysDetails.previousOpp || '',
+      opptysDetails.pricePerPage || '',
+      opptysDetails.serviceEndDate || '',
+      opptysDetails.serviceStartDate || '',
+      opptysDetails.successCriteria || '',
+      opptysDetails.whyOpWin || '',
+      opptysDetails.whyWeLost || '',
+      opptysDetails.salesEngineer || '',
+      opptysDetails.linkToOpp || '',
+      opptysDetails.linkToAccount || '',
+      opptysDetails.currentFiscalYear || '',
+      opptysDetails.currentFiscalQuarter || '',
+      opptysDetails.csmActivityNeeded || '',
       // Engagement metrics
       metrics.engagementScore,
       metrics.daysSinceLastContact !== null ? metrics.daysSinceLastContact : '',
@@ -294,6 +343,8 @@ function buildConsolidatedData(sourceData) {
     ]);
   }
   
+  Logger.log(`Account processing: ${processed} processed, ${skippedNoOppName} skipped (no opp name), ${skippedNotInRenewal} skipped (not in renewal)`);
+  
   // Sort by Renewal Date (column index 3), closest first
   const dataRows = rows.slice(1);
   dataRows.sort((a, b) => {
@@ -306,7 +357,8 @@ function buildConsolidatedData(sourceData) {
 }
 
 /**
- * Build map of Opportunity Name -> Link to SF Opportunity
+ * Build map of Opportunity ID -> Link to SF Opportunity
+ * Extracts opportunity ID from the Salesforce URL
  */
 function buildRenewalOpportunityMap(renewals) {
   const map = new Map();
@@ -314,10 +366,27 @@ function buildRenewalOpportunityMap(renewals) {
   
   for (let i = 1; i < renewals.data.length; i++) {
     const linkCell = renewals.data[i][linkColIdx];
+    
     if (linkCell) {
-      const oppName = extractOpportunityNameFromLink(linkCell);
-      if (oppName) {
-        map.set(oppName, linkCell);
+      // Extract opportunity ID from URL or HYPERLINK formula
+      let oppId = null;
+      
+      if (typeof linkCell === 'string') {
+        // Check if it's a HYPERLINK formula
+        const hyperlinkMatch = linkCell.match(/=HYPERLINK\("([^"]+)"/);
+        if (hyperlinkMatch) {
+          const url = hyperlinkMatch[1];
+          const idMatch = url.match(/\/([a-zA-Z0-9]{15,18})$/);
+          if (idMatch) oppId = idMatch[1];
+        } else {
+          // Plain URL
+          const idMatch = linkCell.match(/\/([a-zA-Z0-9]{15,18})$/);
+          if (idMatch) oppId = idMatch[1];
+        }
+      }
+      
+      if (oppId) {
+        map.set(oppId, linkCell);
       }
     }
   }
@@ -347,7 +416,61 @@ function buildOppIdToNameMap(opptys) {
 }
 
 /**
- * Build map of Opportunity Name -> Renewal Details
+ * Build map of Opportunity Name -> Opptys Details (new columns)
+ */
+function buildOpptysDetailMap(opptys) {
+  const map = new Map();
+  const headers = opptys.headers;
+  
+  const oppNameIdx = headers.indexOf('Name');
+  const fiscalQuarterIdx = headers.indexOf('FiscalQuarter');
+  const fiscalYearIdx = headers.indexOf('FiscalYear');
+  const previousOppIdx = headers.indexOf('Previous_Opportunity__c');
+  const pricePerPageIdx = headers.indexOf('Price_Per_Page__c');
+  const serviceEndDateIdx = headers.indexOf('Service_End_Date__c');
+  const serviceStartDateIdx = headers.indexOf('Service_Start_Date__c');
+  const successCriteriaIdx = headers.indexOf('Success_Criteria__c');
+  const whyOpWinIdx = headers.indexOf('Why_OP_Win_Details__c');
+  const whyWeLostIdx = headers.indexOf('Why_We_Lost__c');
+  const salesEngineerIdx = headers.indexOf('sales_engineer_name');
+  const linkToOppIdx = headers.indexOf('link_to_opp');
+  const linkToAccountIdx = headers.indexOf('link_to_account');
+  const currentFiscalYearIdx = headers.indexOf('current_fiscal_year');
+  const currentFiscalQuarterIdx = headers.indexOf('current_fiscal_quarter');
+  const csmActivityNeededIdx = headers.indexOf('csm_activity_needed');
+  
+  for (let i = 1; i < opptys.data.length; i++) {
+    const row = opptys.data[i];
+    const oppName = row[oppNameIdx];
+    
+    if (oppName) {
+      map.set(oppName, {
+        fiscalQuarter: fiscalQuarterIdx !== -1 ? row[fiscalQuarterIdx] : '',
+        fiscalYear: fiscalYearIdx !== -1 ? row[fiscalYearIdx] : '',
+        previousOpp: previousOppIdx !== -1 ? row[previousOppIdx] : '',
+        pricePerPage: pricePerPageIdx !== -1 ? row[pricePerPageIdx] : '',
+        serviceEndDate: serviceEndDateIdx !== -1 ? row[serviceEndDateIdx] : '',
+        serviceStartDate: serviceStartDateIdx !== -1 ? row[serviceStartDateIdx] : '',
+        successCriteria: successCriteriaIdx !== -1 ? row[successCriteriaIdx] : '',
+        whyOpWin: whyOpWinIdx !== -1 ? row[whyOpWinIdx] : '',
+        whyWeLost: whyWeLostIdx !== -1 ? row[whyWeLostIdx] : '',
+        salesEngineer: salesEngineerIdx !== -1 ? row[salesEngineerIdx] : '',
+        linkToOpp: linkToOppIdx !== -1 ? row[linkToOppIdx] : '',
+        linkToAccount: linkToAccountIdx !== -1 ? row[linkToAccountIdx] : '',
+        currentFiscalYear: currentFiscalYearIdx !== -1 ? row[currentFiscalYearIdx] : '',
+        currentFiscalQuarter: currentFiscalQuarterIdx !== -1 ? row[currentFiscalQuarterIdx] : '',
+        csmActivityNeeded: csmActivityNeededIdx !== -1 ? row[csmActivityNeededIdx] : ''
+      });
+    }
+  }
+  
+  Logger.log(`Built opptys detail map with ${map.size} entries`);
+  return map;
+}
+
+/**
+ * Build map of Opportunity ID -> Renewal Details
+ * Extracts opportunity ID from the Salesforce URL
  */
 function buildRenewalDetailMap(renewals) {
   const map = new Map();
@@ -371,10 +494,26 @@ function buildRenewalDetailMap(renewals) {
   for (let i = 1; i < renewals.data.length; i++) {
     const row = renewals.data[i];
     const linkCell = row[linkColIdx];
-    const oppName = extractOpportunityNameFromLink(linkCell);
     
-    if (oppName) {
-      map.set(oppName, {
+    // Extract opportunity ID from URL or HYPERLINK formula
+    let oppId = null;
+    
+    if (linkCell && typeof linkCell === 'string') {
+      // Check if it's a HYPERLINK formula
+      const hyperlinkMatch = linkCell.match(/=HYPERLINK\("([^"]+)"/);
+      if (hyperlinkMatch) {
+        const url = hyperlinkMatch[1];
+        const idMatch = url.match(/\/([a-zA-Z0-9]{15,18})$/);
+        if (idMatch) oppId = idMatch[1];
+      } else {
+        // Plain URL
+        const idMatch = linkCell.match(/\/([a-zA-Z0-9]{15,18})$/);
+        if (idMatch) oppId = idMatch[1];
+      }
+    }
+    
+    if (oppId) {
+      map.set(oppId, {
         renewalDate: renewalDateIdx !== -1 ? row[renewalDateIdx] : '',
         renewable: renewableIdx !== -1 ? row[renewableIdx] : '',
         forcast: forcastIdx !== -1 ? row[forcastIdx] : '',

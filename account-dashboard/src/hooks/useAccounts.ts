@@ -34,6 +34,7 @@ export function useAccounts() {
             auditUsage: d.auditUsage ?? 0,
             journeyUsage: d.journeyUsage ?? 0,
             meetingsFuture: d.meetingsFuture ?? 0,
+            meetingCadence: d.meetingCadence || '',
           };
         });
         setAccounts(items);

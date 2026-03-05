@@ -40,23 +40,30 @@ export function TaskPanel({ tasks, manualTasks, accountId, accountName }: TaskPa
     if (!form.title.trim()) return;
     setCreating(true);
     try {
-      const cloudFnUrl = import.meta.env.VITE_CLOUD_FUNCTION_URL;
+      // Call Apps Script webhook to create GitHub issue
+      const webhookUrl = import.meta.env.VITE_APPS_SCRIPT_WEBHOOK_URL;
       let githubData = null;
 
-      if (cloudFnUrl) {
-        const res = await fetch(`${cloudFnUrl}/createTask`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: form.title,
-            description: form.description,
-            priority: form.priority,
-            accountName,
-            accountId,
-          }),
-        });
-        if (res.ok) {
-          githubData = await res.json();
+      if (webhookUrl) {
+        try {
+          const res = await fetch(`${webhookUrl}?type=create_task`, {
+            method: 'POST',
+            body: JSON.stringify({
+              title: form.title,
+              description: form.description,
+              priority: form.priority,
+              accountName,
+              accountId,
+            }),
+          });
+          if (res.ok) {
+            const result = await res.json();
+            if (result.success) {
+              githubData = result;
+            }
+          }
+        } catch (webhookErr) {
+          console.warn('GitHub issue creation failed, saving task locally:', webhookErr);
         }
       }
 

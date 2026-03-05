@@ -52,8 +52,17 @@ export interface Account {
   // Notes (bidirectional sync)
   notes: AccountNotes;
 
+  // Success Criteria (bidirectional sync)
+  successCriteria: AccountNotes;
+
+  // Account contacts roster
+  contacts: AccountContact[];
+
   // Manual tasks created in webapp
   manualTasks: ManualTask[];
+
+  // Meeting cadence
+  meetingCadence: string;
 
   // Metadata
   lastSynced: string;
@@ -77,6 +86,7 @@ export interface AccountListItem {
   auditUsage: number;
   journeyUsage: number;
   meetingsFuture: number;
+  meetingCadence: string;
 }
 
 export interface Task {
@@ -136,6 +146,32 @@ export interface MeetingRecap {
   allNames: string;
   duration: string;
   actionItems: ActionItem[];
+  internalAttendees: RecapAttendee[];
+  externalAttendeesDetailed: RecapAttendee[];
+}
+
+export interface RecapAttendee {
+  name: string;
+  email: string;
+  invited: boolean;
+  actuallyAttended: boolean;
+  roles?: string[];
+  title?: string;
+  linkedInUrl?: string;
+  contactId?: string;
+}
+
+export interface AccountContact {
+  email: string;
+  name: string;
+  title: string;
+  roles: string[];
+  linkedInUrl: string;
+  contactId: string;
+  accountId: string;
+  accountName: string;
+  notes: string;
+  lastUpdated: string;
 }
 
 export interface ActionItem {
@@ -151,6 +187,11 @@ export interface ActionItem {
 }
 
 export interface AccountNotes {
+  content: string;
+  lastSaved: string | null;
+}
+
+export interface GlobalNotes {
   content: string;
   lastSaved: string | null;
 }

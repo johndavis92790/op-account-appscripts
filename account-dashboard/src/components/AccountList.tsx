@@ -14,8 +14,11 @@ import {
   Target,
   Activity,
   Video,
-  Filter,
   X,
+  ArrowUp,
+  ArrowDown,
+  Repeat,
+  VideoOff,
 } from 'lucide-react';
 import { format, parseISO, isPast, differenceInDays } from 'date-fns';
 
@@ -25,6 +28,7 @@ export function AccountList() {
   const { accounts, loading, error } = useAccounts();
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortKey>('renewal');
+  const [sortAsc, setSortAsc] = useState(true);
   const [aeFilter, setAeFilter] = useState<string>('');
   const [noFutureMeetings, setNoFutureMeetings] = useState(false);
 
@@ -32,6 +36,16 @@ export function AccountList() {
     const aes = new Set(accounts.map((a) => a.ae).filter(Boolean));
     return Array.from(aes).sort();
   }, [accounts]);
+
+  const handleSortClick = (key: SortKey) => {
+    if (sortBy === key) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortBy(key);
+      // Default direction per sort type
+      setSortAsc(['renewal', 'contact', 'name'].includes(key));
+    }
+  };
 
   const filtered = useMemo(() => {
     let list = accounts.filter((a) =>
@@ -47,32 +61,41 @@ export function AccountList() {
     }
 
     list.sort((a, b) => {
+      let cmp = 0;
       switch (sortBy) {
         case 'renewal':
-          return (a.renewalDate || '9999').localeCompare(b.renewalDate || '9999');
+          cmp = (a.renewalDate || '9999').localeCompare(b.renewalDate || '9999');
+          break;
         case 'score':
-          return (b.engagementScore ?? 0) - (a.engagementScore ?? 0);
+          cmp = (b.engagementScore ?? 0) - (a.engagementScore ?? 0);
+          break;
         case 'contact':
-          return (a.daysSinceLastContact ?? 999) - (b.daysSinceLastContact ?? 999);
+          cmp = (a.daysSinceLastContact ?? 999) - (b.daysSinceLastContact ?? 999);
+          break;
         case 'name':
-          return a.accountName.localeCompare(b.accountName);
+          cmp = a.accountName.localeCompare(b.accountName);
+          break;
         case 'renewable':
-          return (b.renewable ?? 0) - (a.renewable ?? 0);
+          cmp = (b.renewable ?? 0) - (a.renewable ?? 0);
+          break;
         case 'loginScore':
-          return (b.loginScore ?? 0) - (a.loginScore ?? 0);
+          cmp = (b.loginScore ?? 0) - (a.loginScore ?? 0);
+          break;
         case 'auditUsage':
-          return (b.auditUsage ?? 0) - (a.auditUsage ?? 0);
+          cmp = (b.auditUsage ?? 0) - (a.auditUsage ?? 0);
+          break;
         case 'journeyUsage':
-          return (b.journeyUsage ?? 0) - (a.journeyUsage ?? 0);
+          cmp = (b.journeyUsage ?? 0) - (a.journeyUsage ?? 0);
+          break;
         case 'tasks':
-          return (b.githubTasksOpen ?? 0) - (a.githubTasksOpen ?? 0);
-        default:
-          return 0;
+          cmp = (b.githubTasksOpen ?? 0) - (a.githubTasksOpen ?? 0);
+          break;
       }
+      return sortAsc ? cmp : -cmp;
     });
 
     return list;
-  }, [accounts, search, sortBy, aeFilter, noFutureMeetings]);
+  }, [accounts, search, sortBy, sortAsc, aeFilter, noFutureMeetings]);
 
   const navigate = useNavigate();
 
@@ -151,14 +174,17 @@ export function AccountList() {
           ].map((opt) => (
             <button
               key={opt.key}
-              onClick={() => setSortBy(opt.key as SortKey)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+              onClick={() => handleSortClick(opt.key as SortKey)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1 ${
                 sortBy === opt.key
                   ? 'bg-accent/20 text-accent border border-accent/30'
                   : 'bg-dark-800 text-dark-400 border border-dark-700 hover:text-dark-200'
               }`}
             >
               {opt.label}
+              {sortBy === opt.key && (
+                sortAsc ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+              )}
             </button>
           ))}
           {(aeFilter || noFutureMeetings || search) && (
@@ -185,6 +211,7 @@ export function AccountList() {
               onClick={() => navigate(`/account/${account.accountId}`)}
               className="text-left bg-dark-800/60 hover:bg-dark-800 border border-dark-700/50 hover:border-dark-600 rounded-xl p-4 transition-all group"
             >
+              {/* Row 1: Name + Score */}
               <div className="flex items-start justify-between mb-3">
                 <h3 className="font-semibold text-dark-100 group-hover:text-accent transition-colors truncate pr-2">
                   {account.accountName}
@@ -202,74 +229,100 @@ export function AccountList() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-dark-400 mb-2">
-                {account.renewable > 0 && (
-                  <span className="flex items-center gap-1">
+              {/* Row 2: Always-visible metrics in fixed 2-col grid */}
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs mb-2">
+                {/* Renewable Amount - always slot 1 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Amount</span>
+                  <span className="text-dark-300 flex items-center gap-1">
                     <DollarSign className="w-3 h-3 text-emerald-400" />
-                    ${account.renewable.toLocaleString()}
+                    {account.renewable > 0 ? `$${account.renewable.toLocaleString()}` : '—'}
                   </span>
-                )}
-                {renewalDate && (
-                  <span
-                    className={`flex items-center gap-1 ${
-                      isOverdue ? 'text-red-400' : daysToRenewal !== null && daysToRenewal < 30 ? 'text-amber-400' : ''
-                    }`}
-                  >
+                </div>
+
+                {/* Renewal Date - always slot 2 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Renewal Date</span>
+                  <span className={`flex items-center gap-1 ${isOverdue ? 'text-red-400' : daysToRenewal !== null && daysToRenewal < 30 ? 'text-amber-400' : 'text-dark-300'}`}>
                     <Calendar className="w-3 h-3" />
-                    {format(renewalDate, 'MMM d, yyyy')}
-                    {daysToRenewal !== null && (
-                      <span className="text-dark-500 ml-0.5">
-                        ({isOverdue ? 'overdue' : `${daysToRenewal}d`})
-                      </span>
-                    )}
+                    {renewalDate ? (
+                      <>
+                        {format(renewalDate, 'MMM d, yyyy')}
+                        <span className="text-dark-500 ml-0.5">({isOverdue ? 'overdue' : `${daysToRenewal}d`})</span>
+                      </>
+                    ) : '—'}
                   </span>
-                )}
-                {account.loginScore > 0 && (
-                  <span className="flex items-center gap-1">
+                </div>
+
+                {/* Login Score - always slot 3 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Login</span>
+                  <span className="text-dark-300 flex items-center gap-1">
                     <Target className="w-3 h-3" />
-                    Login: {account.loginScore}
+                    {account.loginScore > 0 ? account.loginScore : '—'}
                   </span>
-                )}
-                {account.auditUsage > 0 && (
-                  <span className="flex items-center gap-1">
+                </div>
+
+                {/* Audit Usage - always slot 4 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Audit</span>
+                  <span className="text-dark-300 flex items-center gap-1">
                     <Activity className="w-3 h-3" />
-                    Audit: {Math.round(account.auditUsage * 100)}%
+                    {account.auditUsage > 0 ? `${Math.round(account.auditUsage * 100)}%` : '—'}
                   </span>
-                )}
-                {account.journeyUsage > 0 && (
-                  <span className="flex items-center gap-1">
+                </div>
+
+                {/* Journey Usage - always slot 5 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Journey</span>
+                  <span className="text-dark-300 flex items-center gap-1">
                     <TrendingUp className="w-3 h-3" />
-                    Journey: {Math.round(account.journeyUsage * 100)}%
+                    {account.journeyUsage > 0 ? `${Math.round(account.journeyUsage * 100)}%` : '—'}
                   </span>
-                )}
-                {account.daysSinceLastContact != null && (
-                  <span
-                    className={`flex items-center gap-1 ${
-                      account.daysSinceLastContact > 30
-                        ? 'text-red-400'
-                        : account.daysSinceLastContact > 14
-                        ? 'text-amber-400'
-                        : ''
-                    }`}
-                  >
+                </div>
+
+                {/* Last Contact - always slot 6 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Last Contact</span>
+                  <span className={`flex items-center gap-1 ${
+                    account.daysSinceLastContact != null && account.daysSinceLastContact > 30
+                      ? 'text-red-400'
+                      : account.daysSinceLastContact != null && account.daysSinceLastContact > 14
+                      ? 'text-amber-400'
+                      : 'text-dark-300'
+                  }`}>
                     <Clock className="w-3 h-3" />
-                    {account.daysSinceLastContact}d ago
+                    {account.daysSinceLastContact != null ? `${account.daysSinceLastContact}d ago` : '—'}
                   </span>
-                )}
-                {account.nextMeetingDate && (
-                  <span className="flex items-center gap-1 text-accent/70">
-                    <Video className="w-3 h-3" />
-                    Next: {format(parseISO(account.nextMeetingDate), 'MMM d')}
-                  </span>
-                )}
-                {account.githubTasksOpen > 0 && (
-                  <span className="flex items-center gap-1">
+                </div>
+
+                {/* Next Meeting - always slot 7 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Next Meeting</span>
+                  {account.nextMeetingDate ? (
+                    <span className="text-accent/70 flex items-center gap-1">
+                      <Video className="w-3 h-3" />
+                      {format(parseISO(account.nextMeetingDate), 'MMM d')}
+                    </span>
+                  ) : (
+                    <span className="text-amber-400/70 flex items-center gap-1">
+                      <VideoOff className="w-3 h-3" />
+                      None scheduled
+                    </span>
+                  )}
+                </div>
+
+                {/* Tasks - always slot 8 */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-dark-500 uppercase tracking-wider">Tasks</span>
+                  <span className="text-dark-300 flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" />
-                    {account.githubTasksOpen} tasks
+                    {account.githubTasksOpen > 0 ? `${account.githubTasksOpen} open` : '—'}
                   </span>
-                )}
+                </div>
               </div>
 
+              {/* Row 3: Status bar with cadence */}
               <div className="flex items-center gap-2 text-xs text-dark-500">
                 {account.status && (
                   <span className="flex items-center gap-1">
@@ -287,6 +340,15 @@ export function AccountList() {
                   <>
                     <span className="text-dark-700">·</span>
                     <span className="truncate">{account.stage}</span>
+                  </>
+                )}
+                {account.meetingCadence && (
+                  <>
+                    <span className="text-dark-700">·</span>
+                    <span className="flex items-center gap-0.5">
+                      <Repeat className="w-3 h-3" />
+                      {account.meetingCadence}
+                    </span>
                   </>
                 )}
               </div>

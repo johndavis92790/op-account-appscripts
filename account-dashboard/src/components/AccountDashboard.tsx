@@ -1,7 +1,13 @@
+import { useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAccount } from '../hooks/useAccount';
+import { useGlobalNotes } from '../hooks/useGlobalNotes';
 import { getScoreLevel, getStatusClass } from '../types';
+import type { Meeting, MeetingRecap, Task } from '../types';
 import { NotesEditor } from './NotesEditor';
+import { GlobalNotesEditor } from './GlobalNotesEditor';
+import { SuccessCriteriaEditor } from './SuccessCriteriaEditor';
+import { ContactRoster } from './ContactRoster';
 import { TaskPanel } from './TaskPanel';
 import { EmailPanel } from './EmailPanel';
 import { MeetingsPanel } from './MeetingsPanel';
@@ -21,13 +27,23 @@ import {
   GitBranch,
   FileText,
   RefreshCw,
+  Repeat,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
 export function AccountDashboard() {
   const { accountId } = useParams<{ accountId: string }>();
   const navigate = useNavigate();
-  const { account, loading, error, updateNotes } = useAccount(accountId);
+  const { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes } = useAccount(accountId);
+  const { globalNotes, updateGlobalNotes } = useGlobalNotes();
+
+  const futureMeetings = useMemo(
+    () =>
+      (account?.meetings || [])
+        .filter((m: Meeting) => !m.isPast)
+        .sort((a: Meeting, b: Meeting) => (a.startTime || '').localeCompare(b.startTime || '')),
+    [account?.meetings]
+  );
 
   if (loading) {
     return (
@@ -125,7 +141,7 @@ export function AccountDashboard() {
           }`}
         >
           <div className="text-2xl font-bold">{account.engagementScore}</div>
-          <div className="text-[10px] uppercase tracking-wider opacity-70">Score</div>
+          <div className="text-[10px] uppercase tracking-wider opacity-70">Communication Score</div>
         </div>
       </div>
 
@@ -199,6 +215,11 @@ export function AccountDashboard() {
           label="Tasks (Open / Total)"
           value={`${account.githubTasksOpen} / ${account.githubTasksTotal}`}
         />
+        <MetricCard
+          icon={<Repeat className="w-4 h-4" />}
+          label="Meeting Cadence"
+          value={account.meetingCadence || 'Unknown'}
+        />
       </div>
 
       {/* Key Dates Row */}
@@ -225,16 +246,31 @@ export function AccountDashboard() {
 
       {/* Main Content: Notes + Data Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column: Notes Editor */}
+        {/* Left Column: Global Notes, Success Criteria, Account Notes, Contacts */}
         <div className="space-y-6">
+          <GlobalNotesEditor
+            content={globalNotes.content}
+            lastSaved={globalNotes.lastSaved}
+            onSave={updateGlobalNotes}
+          />
+          <SuccessCriteriaEditor
+            content={account.successCriteria?.content || ''}
+            lastSaved={account.successCriteria?.lastSaved || null}
+            onSave={updateSuccessCriteria}
+            accountName={account.accountName}
+          />
           <NotesEditor
             content={account.notes?.content || ''}
             lastSaved={account.notes?.lastSaved || null}
             onSave={updateNotes}
           />
+          <ContactRoster
+            contacts={account.contacts || []}
+            onUpdateContactNotes={updateContactNotes}
+          />
         </div>
 
-        {/* Right Column: Data Panels */}
+        {/* Right Column: Tasks, Past Meetings & Recaps (first expanded), Emails, Upcoming Meetings */}
         <div className="space-y-6">
           <TaskPanel
             tasks={account.tasks}
@@ -242,11 +278,18 @@ export function AccountDashboard() {
             accountId={account.accountId}
             accountName={account.accountName}
           />
+          <MeetingsPanel
+            meetings={account.meetings}
+            recaps={account.meetingRecaps}
+            tasks={account.tasks}
+            initialView="past"
+          />
           <EmailPanel emails={account.emails} />
           <MeetingsPanel
             meetings={account.meetings}
             recaps={account.meetingRecaps}
             tasks={account.tasks}
+            initialView="upcoming"
           />
         </div>
       </div>

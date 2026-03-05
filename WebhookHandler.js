@@ -12,6 +12,8 @@
 const WEBHOOK_MEETING_RECAPS_SHEET = 'Webhook Meeting Recaps';
 const MEETING_ACTION_ITEMS_SHEET = 'Meeting Action Items';
 const OTHERS_ACTION_ITEMS_SHEET = 'Others Action Items';
+const ACCOUNT_CONTACTS_SHEET = 'Account Contacts';
+const WEBHOOK_LOGS_SHEET = 'Webhook Logs';
 
 /**
  * Handle POST requests (webhooks)
@@ -20,20 +22,28 @@ const OTHERS_ACTION_ITEMS_SHEET = 'Others Action Items';
  */
 function doPost(e) {
   const startTime = new Date();
+  const logEntries = [];
+  
+  const log = (msg) => {
+    Logger.log(msg);
+    logEntries.push(msg);
+  };
   
   try {
     // Parse URL parameters
     const params = e.parameter || {};
     const webhookType = params.type || '';
     
-    Logger.log(`=== Webhook Received: type=${webhookType} ===`);
+    log(`=== Webhook Received: type=${webhookType} ===`);
+    log(`Raw body length: ${(e.postData && e.postData.contents) ? e.postData.contents.length : 0} chars`);
     
     // Parse JSON body
     let payload;
     try {
       payload = JSON.parse(e.postData.contents);
     } catch (parseError) {
-      Logger.log('ERROR: Failed to parse JSON body: ' + parseError.message);
+      log('ERROR: Failed to parse JSON body: ' + parseError.message);
+      logToSheet(webhookType, 'ERROR', 'Parse failed: ' + parseError.message, logEntries);
       return createJsonResponse({
         success: false,
         error: 'Invalid JSON payload',
@@ -41,20 +51,27 @@ function doPost(e) {
       }, 400);
     }
     
+    log(`Payload keys: ${Object.keys(payload).join(', ')}`);
+    if (payload.meetingInfo) log(`Meeting title: ${payload.meetingInfo.title}`);
+    if (payload.externalAttendees) log(`externalAttendees count: ${payload.externalAttendees.length}`);
+    if (payload.internalAttendees) log(`internalAttendees count: ${payload.internalAttendees.length}`);
+    if (payload.title) log(`Task title: ${payload.title}`);
+    
     // Route based on webhook type
     let result;
     switch (webhookType) {
       case 'meeting_recap':
-        result = processMeetingRecapWebhook(payload);
+        result = processMeetingRecapWebhook(payload, log);
         break;
       
-      // Add more webhook types here in the future
-      // case 'other_type':
-      //   result = processOtherWebhook(payload);
-      //   break;
+      case 'create_task':
+        result = processCreateTaskWebhook(payload);
+        log(`Task result: ${JSON.stringify(result)}`);
+        break;
       
       default:
-        Logger.log(`ERROR: Unknown webhook type: ${webhookType}`);
+        log(`ERROR: Unknown webhook type: ${webhookType}`);
+        logToSheet(webhookType, 'ERROR', 'Unknown type', logEntries);
         return createJsonResponse({
           success: false,
           error: 'Unknown webhook type',
@@ -63,7 +80,9 @@ function doPost(e) {
     }
     
     const duration = (new Date() - startTime) / 1000;
-    Logger.log(`=== Webhook Complete in ${duration}s ===`);
+    log(`=== Webhook Complete in ${duration}s ===`);
+    
+    logToSheet(webhookType, result.action || 'success', JSON.stringify(result).substring(0, 500), logEntries);
     
     return createJsonResponse({
       success: true,
@@ -72,8 +91,10 @@ function doPost(e) {
     });
     
   } catch (error) {
-    Logger.log('ERROR in doPost: ' + error.message);
-    Logger.log(error.stack);
+    const msg = 'ERROR in doPost: ' + error.message;
+    log(msg);
+    log(error.stack || '');
+    logToSheet('unknown', 'FATAL_ERROR', error.message, logEntries);
     
     return createJsonResponse({
       success: false,
@@ -107,12 +128,54 @@ function createJsonResponse(data, statusCode) {
 }
 
 /**
+ * Write webhook execution log to a dedicated sheet for debugging
+ */
+function logToSheet(webhookType, status, resultSummary, logEntries) {
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = spreadsheet.getSheetByName(WEBHOOK_LOGS_SHEET);
+    
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(WEBHOOK_LOGS_SHEET);
+      const headers = ['Timestamp', 'Type', 'Status', 'Result Summary', 'Full Log'];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.getRange(1, 1, 1, headers.length)
+        .setFontWeight('bold')
+        .setBackground('#6366f1')
+        .setFontColor('#ffffff');
+      sheet.setFrozenRows(1);
+      sheet.setColumnWidth(4, 400);
+      sheet.setColumnWidth(5, 600);
+    }
+    
+    const fullLog = (logEntries || []).join('\n');
+    const row = [
+      new Date(),
+      webhookType || '',
+      status || '',
+      (resultSummary || '').substring(0, 1000),
+      fullLog.substring(0, 5000)
+    ];
+    
+    sheet.insertRowAfter(1);
+    sheet.getRange(2, 1, 1, row.length).setValues([row]);
+    sheet.getRange(2, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
+    sheet.getRange(2, 5).setWrap(true);
+    
+  } catch (logError) {
+    Logger.log('WARNING: Failed to write to webhook log sheet: ' + logError.message);
+  }
+}
+
+/**
  * Process a meeting recap webhook from AskElephant
  * @param {Object} payload - The meeting recap JSON data
  * @returns {Object} Processing result
  */
-function processMeetingRecapWebhook(payload) {
-  Logger.log('Processing meeting recap webhook...');
+function processMeetingRecapWebhook(payload, log) {
+  if (!log) log = Logger.log.bind(Logger);
+  
+  log('Processing meeting recap webhook...');
   
   // Validate payload structure
   if (!payload.meetingInfo) {
@@ -125,58 +188,91 @@ function processMeetingRecapWebhook(payload) {
     throw new Error('Could not extract meeting recap ID from meetingLink');
   }
   
-  Logger.log(`Meeting Recap ID: ${meetingRecapId}`);
-  Logger.log(`Meeting Title: ${payload.meetingInfo.title}`);
+  log(`Meeting Recap ID: ${meetingRecapId}`);
+  log(`Meeting Title: ${payload.meetingInfo.title}`);
   
-  // Check for duplicate meeting recap
-  if (isMeetingRecapDuplicate(meetingRecapId)) {
-    Logger.log(`⏭️ Duplicate meeting recap: ${meetingRecapId}`);
+  // Always process contacts and attendee details, even on duplicate recaps
+  // We need to flatten first to get account mapping for contacts
+  const recap = flattenWebhookMeetingRecap(payload, meetingRecapId);
+  log(`Account mapping: ${recap.accountName} (${recap.accountId})`);
+  
+  // Process external contacts (always runs, upserts by email)
+  log('Processing external contacts...');
+  let contactsResult = { updated: 0, created: 0 };
+  try {
+    contactsResult = processExternalContacts(payload, recap);
+    log(`Contacts: ${contactsResult.created} created, ${contactsResult.updated} updated`);
+  } catch (contactsError) {
+    log('WARNING: Contacts processing failed: ' + contactsError.message);
+  }
+  
+  // Store attendee details on the recap row (always runs)
+  log('Storing attendee details on recap row...');
+  try {
+    storeAttendeeDetailsOnRecap(meetingRecapId, payload);
+    log('Attendee details stored successfully');
+  } catch (attendeeError) {
+    log('WARNING: Attendee details storage failed: ' + attendeeError.message);
+  }
+  
+  // Check for duplicate meeting recap — skip the rest if duplicate
+  const isDuplicate = isMeetingRecapDuplicate(meetingRecapId);
+  if (isDuplicate) {
+    log(`⏭️ Duplicate meeting recap — skipping recap/action items/GitHub steps`);
     return {
-      action: 'skipped',
+      action: 'skipped_duplicate',
       reason: 'duplicate',
-      meetingRecapId: meetingRecapId
+      meetingRecapId: meetingRecapId,
+      contactsCreated: contactsResult.created,
+      contactsUpdated: contactsResult.updated
     };
   }
   
-  // Step 1: Flatten and store the meeting recap
-  const recap = flattenWebhookMeetingRecap(payload, meetingRecapId);
-  const recapWritten = writeMeetingRecapToSheet(recap);
+  // Step 1: Write the meeting recap to sheet
+  log('Step 1: Writing meeting recap to sheet...');
+  writeMeetingRecapToSheet(recap);
   
   // Step 2: Store action items in separate tables
+  log('Step 2: Writing action items...');
   const myActionItemsResult = writeMyActionItemsToSheet(
     payload.actionItems?.myItems || [],
     meetingRecapId,
     recap
   );
+  log(`  My action items: ${myActionItemsResult.count}`);
   
   const othersActionItemsResult = writeOthersActionItemsToSheet(
     payload.actionItems?.othersItems || [],
     meetingRecapId
   );
+  log(`  Others action items: ${othersActionItemsResult.count}`);
   
   // Step 3: Match to calendar events
-  Logger.log('Step 3: Matching to calendar events...');
+  log('Step 3: Matching to calendar events...');
   try {
     matchMeetingRecapsToCalendarEvents();
+    log('  Calendar matching complete');
   } catch (matchError) {
-    Logger.log('Warning: Calendar matching failed: ' + matchError.message);
+    log('WARNING: Calendar matching failed: ' + matchError.message);
   }
   
   // Step 4: Import existing GitHub tasks for duplicate detection
-  Logger.log('Step 4: Importing GitHub tasks for duplicate detection...');
+  log('Step 4: Importing GitHub tasks...');
   try {
     importGitHubTasks();
+    log('  GitHub task import complete');
   } catch (githubImportError) {
-    Logger.log('Warning: GitHub task import failed: ' + githubImportError.message);
+    log('WARNING: GitHub task import failed: ' + githubImportError.message);
   }
   
   // Step 5: Create GitHub issues from my action items
-  Logger.log('Step 5: Creating GitHub issues from action items...');
+  log('Step 5: Creating GitHub issues...');
   let githubResult = { created: 0, skipped: 0, errors: 0 };
   try {
     githubResult = createGitHubIssuesFromActionItems(meetingRecapId, recap);
+    log(`  GitHub issues: ${githubResult.created} created, ${githubResult.skipped} skipped, ${githubResult.errors} errors`);
   } catch (githubError) {
-    Logger.log('Warning: GitHub issue creation failed: ' + githubError.message);
+    log('WARNING: GitHub issue creation failed: ' + githubError.message);
   }
   
   return {
@@ -186,7 +282,9 @@ function processMeetingRecapWebhook(payload) {
     myActionItems: myActionItemsResult.count,
     othersActionItems: othersActionItemsResult.count,
     githubIssuesCreated: githubResult.created,
-    githubIssuesSkipped: githubResult.skipped
+    githubIssuesSkipped: githubResult.skipped,
+    contactsCreated: contactsResult.created,
+    contactsUpdated: contactsResult.updated
   };
 }
 
@@ -909,6 +1007,245 @@ function isActionItemDuplicate(meetingRecapId, actionItemIndex) {
   }
   
   return false;
+}
+
+/**
+ * Process external contacts from the new externalAttendees array in the webhook payload.
+ * Creates/updates rows in the Account Contacts sheet keyed by email.
+ */
+function processExternalContacts(payload, recap) {
+  const externalAttendees = payload.externalAttendees || [];
+  if (externalAttendees.length === 0) {
+    Logger.log('No externalAttendees in payload');
+    return { created: 0, updated: 0 };
+  }
+  
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = spreadsheet.getSheetByName(ACCOUNT_CONTACTS_SHEET);
+  
+  const headers = [
+    'Email',
+    'Name',
+    'Title',
+    'Roles',
+    'LinkedIn URL',
+    'Contact ID',
+    'Account ID',
+    'Account Name',
+    'Notes',
+    'Last Updated',
+    'Last Meeting Recap ID'
+  ];
+  
+  // Create sheet if it doesn't exist
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(ACCOUNT_CONTACTS_SHEET);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#0d9488')
+      .setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+    Logger.log(`Created new ${ACCOUNT_CONTACTS_SHEET} sheet`);
+  }
+  
+  // Ensure headers exist
+  let hasHeaders = false;
+  if (sheet.getLastRow() > 0) {
+    hasHeaders = (sheet.getRange(1, 1).getValue() === 'Email');
+  }
+  if (!hasHeaders) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  
+  // Build existing contacts map: email -> rowIndex
+  const existingContacts = new Map();
+  if (sheet.getLastRow() > 1) {
+    const data = sheet.getDataRange().getValues();
+    const emailIdx = data[0].indexOf('Email');
+    for (let i = 1; i < data.length; i++) {
+      const email = String(data[i][emailIdx] || '').toLowerCase().trim();
+      if (email) existingContacts.set(email, i + 1); // 1-indexed row
+    }
+  }
+  
+  let created = 0;
+  let updated = 0;
+  
+  for (const attendee of externalAttendees) {
+    const email = (attendee.Email || '').toLowerCase().trim();
+    if (!email) continue;
+    
+    const name = attendee.Name || '';
+    const title = attendee.Title || '';
+    const roles = Array.isArray(attendee.Roles) ? attendee.Roles.join(', ') : (attendee.Roles || '');
+    const linkedInUrl = attendee['LinkedIn URL'] || '';
+    const contactId = attendee['Contact ID'] || '';
+    const accountId = recap.accountId || '';
+    const accountName = recap.accountName || '';
+    
+    if (existingContacts.has(email)) {
+      // Update existing contact (but preserve Notes)
+      const rowNum = existingContacts.get(email);
+      const notesIdx = headers.indexOf('Notes') + 1;
+      const existingNotes = sheet.getRange(rowNum, notesIdx).getValue();
+      
+      const updatedRow = [
+        email, name, title, roles, linkedInUrl, contactId,
+        accountId, accountName, existingNotes || '', new Date(), recap.meetingRecapId || ''
+      ];
+      sheet.getRange(rowNum, 1, 1, updatedRow.length).setValues([updatedRow]);
+      updated++;
+      Logger.log(`  ✓ Updated contact: ${name} (${email})`);
+    } else {
+      // Create new contact
+      const newRow = [
+        email, name, title, roles, linkedInUrl, contactId,
+        accountId, accountName, '', new Date(), recap.meetingRecapId || ''
+      ];
+      sheet.appendRow(newRow);
+      created++;
+      Logger.log(`  + Created contact: ${name} (${email})`);
+    }
+  }
+  
+  Logger.log(`Contacts: ${created} created, ${updated} updated`);
+  return { created, updated };
+}
+
+/**
+ * Store detailed attendee info (internalAttendees/externalAttendees) as JSON
+ * on additional columns of the Webhook Meeting Recaps sheet row.
+ */
+function storeAttendeeDetailsOnRecap(meetingRecapId, payload) {
+  const internalAttendees = payload.internalAttendees || [];
+  const externalAttendees = payload.externalAttendees || [];
+  
+  if (internalAttendees.length === 0 && externalAttendees.length === 0) return;
+  
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(WEBHOOK_MEETING_RECAPS_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf('Meeting Recap ID');
+  
+  // Ensure columns exist
+  let intAttendeesIdx = headers.indexOf('Internal Attendees JSON');
+  let extAttendeesIdx = headers.indexOf('External Attendees JSON');
+  
+  if (intAttendeesIdx === -1) {
+    intAttendeesIdx = headers.length;
+    sheet.getRange(1, intAttendeesIdx + 1).setValue('Internal Attendees JSON');
+  }
+  if (extAttendeesIdx === -1) {
+    extAttendeesIdx = intAttendeesIdx + 1;
+    if (headers.indexOf('External Attendees JSON') === -1) {
+      sheet.getRange(1, extAttendeesIdx + 1).setValue('External Attendees JSON');
+    }
+  }
+  
+  // Find the recap row and update
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idIdx] === meetingRecapId) {
+      sheet.getRange(i + 1, intAttendeesIdx + 1).setValue(JSON.stringify(internalAttendees));
+      sheet.getRange(i + 1, extAttendeesIdx + 1).setValue(JSON.stringify(externalAttendees));
+      Logger.log(`Stored attendee details on recap row ${i + 1}`);
+      break;
+    }
+  }
+}
+
+/**
+ * Process a create_task webhook - creates a GitHub issue and returns the result.
+ * Called from the webapp's TaskPanel via the Apps Script web app URL.
+ */
+function processCreateTaskWebhook(payload) {
+  Logger.log('Processing create_task webhook...');
+  
+  const title = payload.title;
+  const description = payload.description || '';
+  const priority = payload.priority || 'Medium';
+  const accountName = payload.accountName || '';
+  const accountId = payload.accountId || '';
+  
+  if (!title) {
+    throw new Error('Missing required field: title');
+  }
+  
+  try {
+    const config = validateGitHubConfig();
+    ensureAutoGeneratedLabel(config.githubToken);
+    const projectInfo = getProjectFieldInfo(config);
+    
+    if (!projectInfo) {
+      throw new Error('Could not retrieve GitHub project info');
+    }
+    
+    // Build issue body
+    let body = description;
+    if (accountName) {
+      body += '\n\n---\n';
+      body += `**Account:** ${accountName}\n`;
+      body += `**Priority:** ${priority}\n`;
+      body += `\n*Manually created from dashboard on ${new Date().toISOString().split('T')[0]}*`;
+    }
+    
+    // Build labels
+    const labels = ['manual-task'];
+    if (accountName) {
+      labels.push(ACCOUNT_LABEL_PREFIX + accountName);
+    }
+    
+    // Create the issue
+    const issueData = createGitHubIssue(
+      config.githubToken,
+      GITHUB_ISSUE_REPO_OWNER,
+      GITHUB_ISSUE_REPO_NAME,
+      title,
+      body,
+      labels
+    );
+    
+    if (!issueData) {
+      throw new Error('Failed to create GitHub issue');
+    }
+    
+    const issueNodeId = issueData.node_id;
+    const issueNumber = issueData.number;
+    const issueUrl = issueData.html_url;
+    
+    // Add to project
+    const projectItemId = addIssueToProject(config.githubToken, projectInfo.projectId, issueNodeId);
+    
+    // Set priority if available
+    if (projectItemId && priority && projectInfo.priorityFieldId && projectInfo.priorityOptions) {
+      const priorityOptionId = projectInfo.priorityOptions[priority];
+      if (priorityOptionId) {
+        setProjectItemField(
+          config.githubToken,
+          projectInfo.projectId,
+          projectItemId,
+          projectInfo.priorityFieldId,
+          priorityOptionId
+        );
+      }
+    }
+    
+    Logger.log(`✓ Created task issue #${issueNumber}: ${title}`);
+    
+    return {
+      action: 'created',
+      issueNodeId: issueNodeId,
+      issueNumber: issueNumber,
+      issueUrl: issueUrl
+    };
+    
+  } catch (error) {
+    Logger.log('ERROR in processCreateTaskWebhook: ' + error.message);
+    throw error;
+  }
 }
 
 /**

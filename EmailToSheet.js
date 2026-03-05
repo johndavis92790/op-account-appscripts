@@ -213,26 +213,59 @@ function findAndExtractLatestCSV(config) {
 
 /**
  * Parse CSV content into array of arrays
+ * Handles newlines within quoted fields
  */
 function parseCSV(csvContent) {
-  const lines = csvContent.split(/\r?\n/);
   const result = [];
   let healthColumnIndex = -1;
+  let headerProcessed = false;
   
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.length === 0) continue;
+  let currentRow = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < csvContent.length; i++) {
+    const char = csvContent[i];
+    const nextChar = i < csvContent.length - 1 ? csvContent[i + 1] : null;
     
-    const row = parseCSVLine(line);
-    
-    if (i === 0) {
-      healthColumnIndex = row.indexOf('Health');
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        currentRow += '""';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+        currentRow += char;
+      }
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && nextChar === '\n') {
+        i++;
+      }
+      
+      if (currentRow.trim().length > 0) {
+        const row = parseCSVLine(currentRow.trim());
+        
+        if (!headerProcessed) {
+          healthColumnIndex = row.indexOf('Health');
+          headerProcessed = true;
+        }
+        
+        if (healthColumnIndex > -1) {
+          row.splice(healthColumnIndex, 1);
+        }
+        
+        result.push(row);
+      }
+      
+      currentRow = '';
+    } else {
+      currentRow += char;
     }
-    
-    if (healthColumnIndex !== -1) {
+  }
+  
+  if (currentRow.trim().length > 0) {
+    const row = parseCSVLine(currentRow.trim());
+    if (healthColumnIndex > -1) {
       row.splice(healthColumnIndex, 1);
     }
-    
     result.push(row);
   }
   
@@ -300,21 +333,57 @@ function processDataForSheet(data) {
   const forcastIndex = headers.indexOf('Forcast');
   const amountIndex = headers.indexOf('Amount (gross)');
   
+  // New Opptys Report columns
+  const linkToOppIndex = headers.indexOf('link_to_opp');
+  const linkToAccountIndex = headers.indexOf('link_to_account');
+  const serviceEndDateIndex = headers.indexOf('Service_End_Date__c');
+  const serviceStartDateIndex = headers.indexOf('Service_Start_Date__c');
+  const pricePerPageIndex = headers.indexOf('Price_Per_Page__c');
+  const fiscalQuarterIndex = headers.indexOf('FiscalQuarter');
+  const fiscalYearIndex = headers.indexOf('FiscalYear');
+  const currentFiscalYearIndex = headers.indexOf('current_fiscal_year');
+  const currentFiscalQuarterIndex = headers.indexOf('current_fiscal_quarter');
+  const csmActivityNeededIndex = headers.indexOf('csm_activity_needed');
+  
   const processedData = data.map((row, rowIndex) => {
     if (rowIndex === 0) return row;
     
     const newRow = [...row];
     
+    // Original Link to SF Opportunity column - extract URL only
     if (linkColumnIndex !== -1) {
       const cellValue = row[linkColumnIndex];
       if (cellValue && cellValue.includes('<a href')) {
         const parsed = parseHTMLLink(cellValue);
         if (parsed) {
-          newRow[linkColumnIndex] = `=HYPERLINK("${parsed.url}", "${parsed.text}")`;
+          newRow[linkColumnIndex] = parsed.url;
         }
       }
     }
     
+    // New link_to_opp column - extract URL only
+    if (linkToOppIndex !== -1) {
+      const cellValue = row[linkToOppIndex];
+      if (cellValue && cellValue.includes('<a href')) {
+        const parsed = parseHTMLLink(cellValue);
+        if (parsed) {
+          newRow[linkToOppIndex] = parsed.url;
+        }
+      }
+    }
+    
+    // New link_to_account column - extract URL only
+    if (linkToAccountIndex !== -1) {
+      const cellValue = row[linkToAccountIndex];
+      if (cellValue && cellValue.includes('<a href')) {
+        const parsed = parseHTMLLink(cellValue);
+        if (parsed) {
+          newRow[linkToAccountIndex] = parsed.url;
+        }
+      }
+    }
+    
+    // Original Renewal Date column
     if (renewalDateIndex !== -1) {
       const dateValue = row[renewalDateIndex];
       if (dateValue) {
@@ -325,6 +394,29 @@ function processDataForSheet(data) {
       }
     }
     
+    // Service End Date
+    if (serviceEndDateIndex !== -1) {
+      const dateValue = row[serviceEndDateIndex];
+      if (dateValue) {
+        const dateMatch = dateValue.match(/(\d{4}-\d{2}-\d{2})/);
+        if (dateMatch) {
+          newRow[serviceEndDateIndex] = dateMatch[1];
+        }
+      }
+    }
+    
+    // Service Start Date
+    if (serviceStartDateIndex !== -1) {
+      const dateValue = row[serviceStartDateIndex];
+      if (dateValue) {
+        const dateMatch = dateValue.match(/(\d{4}-\d{2}-\d{2})/);
+        if (dateMatch) {
+          newRow[serviceStartDateIndex] = dateMatch[1];
+        }
+      }
+    }
+    
+    // Original numeric columns
     if (renewableIndex !== -1 && row[renewableIndex]) {
       newRow[renewableIndex] = parseFloat(row[renewableIndex]) || row[renewableIndex];
     }
@@ -335,6 +427,31 @@ function processDataForSheet(data) {
     
     if (amountIndex !== -1 && row[amountIndex]) {
       newRow[amountIndex] = parseFloat(row[amountIndex]) || row[amountIndex];
+    }
+    
+    // New numeric columns
+    if (pricePerPageIndex !== -1 && row[pricePerPageIndex]) {
+      newRow[pricePerPageIndex] = parseFloat(row[pricePerPageIndex]) || row[pricePerPageIndex];
+    }
+    
+    if (fiscalQuarterIndex !== -1 && row[fiscalQuarterIndex]) {
+      newRow[fiscalQuarterIndex] = parseFloat(row[fiscalQuarterIndex]) || row[fiscalQuarterIndex];
+    }
+    
+    if (fiscalYearIndex !== -1 && row[fiscalYearIndex]) {
+      newRow[fiscalYearIndex] = parseFloat(row[fiscalYearIndex]) || row[fiscalYearIndex];
+    }
+    
+    if (currentFiscalYearIndex !== -1 && row[currentFiscalYearIndex]) {
+      newRow[currentFiscalYearIndex] = parseFloat(row[currentFiscalYearIndex]) || row[currentFiscalYearIndex];
+    }
+    
+    if (currentFiscalQuarterIndex !== -1 && row[currentFiscalQuarterIndex]) {
+      newRow[currentFiscalQuarterIndex] = parseFloat(row[currentFiscalQuarterIndex]) || row[currentFiscalQuarterIndex];
+    }
+    
+    if (csmActivityNeededIndex !== -1 && row[csmActivityNeededIndex]) {
+      newRow[csmActivityNeededIndex] = parseFloat(row[csmActivityNeededIndex]) || row[csmActivityNeededIndex];
     }
     
     return newRow;
@@ -362,19 +479,11 @@ function writeToSheet(data, sheetName) {
     
     const headers = processedData[0];
     const linkColumnIndex = headers.indexOf('Link to SF Opportunity');
+    const linkToOppIndex = headers.indexOf('link_to_opp');
+    const linkToAccountIndex = headers.indexOf('link_to_account');
     
     // Write all data at once (much faster than cell-by-cell)
     sheet.getRange(1, 1, processedData.length, processedData[0].length).setValues(processedData);
-    
-    // Handle formulas separately (only for HYPERLINK cells)
-    if (linkColumnIndex !== -1) {
-      for (let i = 1; i < processedData.length; i++) {
-        const cellValue = processedData[i][linkColumnIndex];
-        if (cellValue && typeof cellValue === 'string' && cellValue.startsWith('=HYPERLINK')) {
-          sheet.getRange(i + 1, linkColumnIndex + 1).setFormula(cellValue);
-        }
-      }
-    }
     
     sheet.getRange(1, 1, 1, processedData[0].length)
       .setFontWeight('bold')
@@ -392,6 +501,7 @@ function writeToSheet(data, sheetName) {
     const amountIndex = headers.indexOf('Amount (gross)');
     const auditUsageIndex = headers.indexOf('Audit Usage');
     const journeyUsageIndex = headers.indexOf('Journey Usage');
+    const pricePerPageIndex = headers.indexOf('Price_Per_Page__c');
     
     if (processedData.length > 1) {
       if (renewableIndex !== -1) {
@@ -413,6 +523,10 @@ function writeToSheet(data, sheetName) {
       if (journeyUsageIndex !== -1) {
         sheet.getRange(2, journeyUsageIndex + 1, processedData.length - 1, 1)
           .setNumberFormat('0.00%');
+      }
+      if (pricePerPageIndex !== -1) {
+        sheet.getRange(2, pricePerPageIndex + 1, processedData.length - 1, 1)
+          .setNumberFormat('$#,##0.00');
       }
     }
   }

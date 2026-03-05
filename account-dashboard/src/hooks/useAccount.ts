@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { Account } from '../types';
+import type { Account, AccountContact } from '../types';
 
 export function useAccount(accountId: string | undefined) {
   const [account, setAccount] = useState<Account | null>(null);
@@ -59,7 +59,10 @@ export function useAccount(accountId: string | undefined) {
             meetings: d.meetings || [],
             meetingRecaps: d.meetingRecaps || [],
             notes: d.notes || { content: '', lastSaved: null },
+            successCriteria: d.successCriteria || { content: '', lastSaved: null },
+            contacts: d.contacts || [],
             manualTasks: d.manualTasks || [],
+            meetingCadence: d.meetingCadence || '',
             lastSynced: d.lastSynced || '',
           } as Account);
         } else {
@@ -87,5 +90,27 @@ export function useAccount(accountId: string | undefined) {
     });
   };
 
-  return { account, loading, error, updateNotes };
+  const updateSuccessCriteria = async (content: string) => {
+    if (!accountId) return;
+    const docRef = doc(db, 'accounts', accountId);
+    await updateDoc(docRef, {
+      'successCriteria.content': content,
+      'successCriteria.lastSaved': new Date().toISOString(),
+      'successCriteria.source': 'webapp',
+    });
+  };
+
+  const updateContactNotes = async (contactEmail: string, notes: string) => {
+    if (!accountId || !account) return;
+    const updatedContacts = (account.contacts || []).map((c: AccountContact) =>
+      c.email === contactEmail ? { ...c, notes, lastUpdated: new Date().toISOString() } : c
+    );
+    const docRef = doc(db, 'accounts', accountId);
+    await updateDoc(docRef, {
+      contacts: updatedContacts,
+      'contactsSource': 'webapp',
+    });
+  };
+
+  return { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes };
 }

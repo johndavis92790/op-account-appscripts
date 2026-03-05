@@ -128,6 +128,7 @@ function loadSourceTablesForSync(spreadsheet) {
     meetingRecaps: loadSheet('Webhook Meeting Recaps'),
     actionItems: loadSheet('Meeting Action Items'),
     notesStorage: loadSheet('Notes Storage'),
+    accountContacts: loadSheet('Account Contacts'),
   };
 }
 
@@ -166,6 +167,12 @@ function buildFirestoreDocument(row, headers, accountId, accountName, sources) {
   
   // Get notes from Notes Storage
   const notes = getNotesForAccount(accountId, sources.notesStorage);
+  
+  // Resolve contacts for account
+  const contacts = resolveContactsForAccount(accountId, accountName, sources.accountContacts);
+  
+  // Calculate meeting cadence from past meetings
+  const meetingCadence = calculateMeetingCadence(meetings);
   
   return {
     accountId: accountId,
@@ -206,6 +213,8 @@ function buildFirestoreDocument(row, headers, accountId, accountName, sources) {
     meetings: meetings,
     meetingRecaps: meetingRecaps,
     notes: notes,
+    contacts: contacts,
+    meetingCadence: meetingCadence,
     manualTasks: [], // preserved from Firestore, not overwritten
     lastSynced: new Date().toISOString(),
   };
@@ -377,6 +386,8 @@ function resolveRecapsForAccount(accountId, meetingRecaps, actionItems) {
   const externalAttendeesIdx = h.indexOf('External Attendees');
   const allNamesIdx = h.indexOf('All Names');
   const durationIdx = h.indexOf('Duration');
+  const intAttendeesJsonIdx = h.indexOf('Internal Attendees JSON');
+  const extAttendeesJsonIdx = h.indexOf('External Attendees JSON');
   
   // Build action items lookup by recap ID
   const aiByRecap = new Map();
@@ -434,8 +445,114 @@ function resolveRecapsForAccount(accountId, meetingRecaps, actionItems) {
         allNames: String(r[allNamesIdx] || ''),
         duration: String(r[durationIdx] || ''),
         actionItems: aiByRecap.get(recapId) || [],
+        internalAttendees: parseAttendeesJson(r[intAttendeesJsonIdx]),
+        externalAttendeesDetailed: parseAttendeesJson(r[extAttendeesJsonIdx]),
       };
     });
+}
+
+/**
+ * Parse attendees JSON from sheet cell, mapping to standardized format
+ */
+function parseAttendeesJson(cellValue) {
+  if (!cellValue) return [];
+  try {
+    const arr = JSON.parse(String(cellValue));
+    if (!Array.isArray(arr)) return [];
+    return arr.map(a => ({
+      name: a.Name || a.name || '',
+      email: a.Email || a.email || '',
+      invited: a.Invited !== undefined ? a.Invited : (a.invited !== undefined ? a.invited : true),
+      actuallyAttended: a['Actually Attended'] !== undefined ? a['Actually Attended'] : (a.actuallyAttended !== undefined ? a.actuallyAttended : false),
+      roles: a.Roles || a.roles || [],
+      title: a.Title || a.title || '',
+      linkedInUrl: a['LinkedIn URL'] || a.linkedInUrl || '',
+      contactId: a['Contact ID'] || a.contactId || '',
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Resolve contacts for an account from Account Contacts sheet
+ */
+function resolveContactsForAccount(accountId, accountName, accountContacts) {
+  if (!accountContacts.headers.length) return [];
+  
+  const h = accountContacts.headers;
+  const emailIdx = h.indexOf('Email');
+  const nameIdx = h.indexOf('Name');
+  const titleIdx = h.indexOf('Title');
+  const rolesIdx = h.indexOf('Roles');
+  const linkedInIdx = h.indexOf('LinkedIn URL');
+  const contactIdIdx = h.indexOf('Contact ID');
+  const aidIdx = h.indexOf('Account ID');
+  const anameIdx = h.indexOf('Account Name');
+  const notesIdx = h.indexOf('Notes');
+  const lastUpdatedIdx = h.indexOf('Last Updated');
+  
+  return accountContacts.rows
+    .filter(r => {
+      const rowAid = String(r[aidIdx] || '').trim();
+      const rowAname = String(r[anameIdx] || '').trim();
+      return rowAid === accountId || rowAname === accountName;
+    })
+    .map(r => ({
+      email: String(r[emailIdx] || '').toLowerCase().trim(),
+      name: String(r[nameIdx] || ''),
+      title: String(r[titleIdx] || ''),
+      roles: String(r[rolesIdx] || '').split(',').map(s => s.trim()).filter(Boolean),
+      linkedInUrl: String(r[linkedInIdx] || ''),
+      contactId: String(r[contactIdIdx] || ''),
+      accountId: accountId,
+      accountName: accountName,
+      notes: String(r[notesIdx] || ''),
+      lastUpdated: r[lastUpdatedIdx] ? (r[lastUpdatedIdx] instanceof Date ? r[lastUpdatedIdx].toISOString() : String(r[lastUpdatedIdx])) : '',
+    }));
+}
+
+/**
+ * Calculate meeting cadence from past meetings.
+ * Looks at intervals between meetings over the last 6 months.
+ * Returns: 'Weekly', 'Bi-weekly', 'Monthly', 'Ad Hoc', or ''
+ */
+function calculateMeetingCadence(meetings) {
+  const now = new Date();
+  const sixMonthsAgo = new Date(now.getTime() - 180 * 86400000);
+  
+  // Filter to past meetings in last 6 months
+  const pastMeetings = meetings
+    .filter(m => m.isPast && m.startTime)
+    .map(m => new Date(m.startTime))
+    .filter(d => d >= sixMonthsAgo && d <= now)
+    .sort((a, b) => a - b);
+  
+  if (pastMeetings.length < 2) return pastMeetings.length === 1 ? 'Ad Hoc' : '';
+  
+  // Calculate intervals in days between consecutive meetings
+  const intervals = [];
+  for (let i = 1; i < pastMeetings.length; i++) {
+    const days = (pastMeetings[i] - pastMeetings[i - 1]) / 86400000;
+    intervals.push(days);
+  }
+  
+  const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+  
+  // Calculate standard deviation to check consistency
+  const variance = intervals.reduce((sum, val) => sum + Math.pow(val - avgInterval, 2), 0) / intervals.length;
+  const stdDev = Math.sqrt(variance);
+  const cv = stdDev / avgInterval; // coefficient of variation
+  
+  // If too irregular (CV > 0.6), it's ad hoc
+  if (cv > 0.6 && pastMeetings.length < 6) return 'Ad Hoc';
+  
+  // Classify based on average interval
+  if (avgInterval <= 9) return 'Weekly';
+  if (avgInterval <= 18) return 'Bi-weekly';
+  if (avgInterval <= 40) return 'Monthly';
+  if (avgInterval <= 70) return 'Bi-monthly';
+  return 'Ad Hoc';
 }
 
 /**
@@ -605,8 +722,10 @@ function convertToFirestoreFields(obj) {
   const fields = {};
   
   for (const [key, value] of Object.entries(obj)) {
-    // Skip manualTasks — these are managed by the webapp, not overwritten by sync
+    // Skip fields managed by the webapp, not overwritten by sync
     if (key === 'manualTasks') continue;
+    if (key === 'successCriteria') continue;
+    if (key === 'contactsSource') continue;
     
     fields[key] = convertToFirestoreValue(value);
   }
