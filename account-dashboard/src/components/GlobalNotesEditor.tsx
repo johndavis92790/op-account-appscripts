@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { useResizableHeight } from '../hooks/useResizableHeight';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -27,6 +28,10 @@ export function GlobalNotesEditor({ content, lastSaved, onSave }: GlobalNotesEdi
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const { height, onResizeStart } = useResizableHeight({
+    storageKey: 'globalNotesHeight',
+    defaultHeight: 300,
+  });
 
   const editor = useEditor({
     extensions: [
@@ -182,8 +187,15 @@ export function GlobalNotesEditor({ content, lastSaved, onSave }: GlobalNotesEdi
         </ToolBtn>
       </div>
 
-      <div className="max-h-[300px] overflow-y-auto">
+      <div className="overflow-y-auto" style={{ maxHeight: height }}>
         <EditorContent editor={editor} />
+      </div>
+      <div
+        onMouseDown={onResizeStart}
+        className="h-1.5 cursor-row-resize hover:bg-accent/20 transition-colors flex items-center justify-center group"
+        title="Drag to resize"
+      >
+        <div className="w-8 h-0.5 bg-dark-600 group-hover:bg-accent/40 rounded-full transition-colors" />
       </div>
     </div>
   );

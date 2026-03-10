@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO, isPast, differenceInDays, isToday, isTomorrow } from 'date-fns';
 
-type SortKey = 'renewal' | 'score' | 'contact' | 'name' | 'renewable' | 'loginScore' | 'auditUsage' | 'journeyUsage' | 'tasks' | 'pricePerPage';
+type SortKey = 'renewal' | 'score' | 'contact' | 'name' | 'renewable' | 'loginScore' | 'auditUsage' | 'journeyUsage' | 'tasks' | 'pricePerPage' | 'lastMeeting';
 type MeetingFilter = '' | 'none' | 'today' | 'tomorrow';
 
 export function AccountList() {
@@ -34,8 +34,7 @@ export function AccountList() {
   const [sortAsc, setSortAsc] = useState(true);
   const [aeFilter, setAeFilter] = useState<string>('');
   const [seFilter, setSeFilter] = useState<string>('');
-  const [fqFilter, setFqFilter] = useState<string>('');
-  const [fyFilter, setFyFilter] = useState<string>('');
+  const [fqComboFilter, setFqComboFilter] = useState<string>('');
   const [meetingFilter, setMeetingFilter] = useState<MeetingFilter>('');
 
   const aeOptions = useMemo(() => {
@@ -48,14 +47,13 @@ export function AccountList() {
     return Array.from(ses).sort();
   }, [accounts]);
 
-  const fqOptions = useMemo(() => {
-    const fqs = new Set(accounts.map((a) => a.fiscalQuarter).filter(Boolean));
-    return Array.from(fqs).sort();
-  }, [accounts]);
-
-  const fyOptions = useMemo(() => {
-    const fys = new Set(accounts.map((a) => a.fiscalYear).filter(Boolean));
-    return Array.from(fys).sort();
+  const fqComboOptions = useMemo(() => {
+    const combos = new Set(
+      accounts
+        .filter((a) => a.fiscalYear && a.fiscalQuarter)
+        .map((a) => `${a.fiscalYear}-Q${a.fiscalQuarter}`)
+    );
+    return Array.from(combos).sort();
   }, [accounts]);
 
   const handleSortClick = (key: SortKey) => {
@@ -71,7 +69,7 @@ export function AccountList() {
     setMeetingFilter(meetingFilter === filter ? '' : filter);
   };
 
-  const hasAnyFilter = aeFilter || seFilter || fqFilter || fyFilter || meetingFilter || search;
+  const hasAnyFilter = aeFilter || seFilter || fqComboFilter || meetingFilter || search;
 
   const filtered = useMemo(() => {
     let list = accounts.filter((a) =>
@@ -80,15 +78,24 @@ export function AccountList() {
 
     if (aeFilter) list = list.filter((a) => a.ae === aeFilter);
     if (seFilter) list = list.filter((a) => a.salesEngineer === seFilter);
-    if (fqFilter) list = list.filter((a) => a.fiscalQuarter === fqFilter);
-    if (fyFilter) list = list.filter((a) => a.fiscalYear === fyFilter);
+    if (fqComboFilter) {
+      list = list.filter((a) => {
+        if (!a.fiscalYear || !a.fiscalQuarter) return false;
+        return `${a.fiscalYear}-Q${a.fiscalQuarter}` === fqComboFilter;
+      });
+    }
 
     if (meetingFilter === 'none') {
       list = list.filter((a) => !a.nextMeetingDate && a.meetingsFuture === 0);
     } else if (meetingFilter === 'today') {
       list = list.filter((a) => {
-        if (!a.nextMeetingDate) return false;
-        try { return isToday(parseISO(a.nextMeetingDate)); } catch { return false; }
+        if (a.nextMeetingDate) {
+          try { if (isToday(parseISO(a.nextMeetingDate))) return true; } catch {}
+        }
+        if (a.lastMeetingDate) {
+          try { if (isToday(parseISO(a.lastMeetingDate))) return true; } catch {}
+        }
+        return false;
       });
     } else if (meetingFilter === 'tomorrow') {
       list = list.filter((a) => {
@@ -120,12 +127,17 @@ export function AccountList() {
           cmp = (b.githubTasksOpen ?? 0) - (a.githubTasksOpen ?? 0); break;
         case 'pricePerPage':
           cmp = (b.pricePerPage ?? 0) - (a.pricePerPage ?? 0); break;
+        case 'lastMeeting': {
+          const daysA = a.lastMeetingDate ? differenceInDays(new Date(), parseISO(a.lastMeetingDate)) : 9999;
+          const daysB = b.lastMeetingDate ? differenceInDays(new Date(), parseISO(b.lastMeetingDate)) : 9999;
+          cmp = daysB - daysA; break;
+        }
       }
       return sortAsc ? cmp : -cmp;
     });
 
     return list;
-  }, [accounts, search, sortBy, sortAsc, aeFilter, seFilter, fqFilter, fyFilter, meetingFilter]);
+  }, [accounts, search, sortBy, sortAsc, aeFilter, seFilter, fqComboFilter, meetingFilter]);
 
   const navigate = useNavigate();
 
@@ -195,13 +207,9 @@ export function AccountList() {
             <option value="">All SEs</option>
             {seOptions.map((se) => (<option key={se} value={se}>{se}</option>))}
           </select>
-          <select value={fyFilter} onChange={(e) => setFyFilter(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-xs text-dark-200 focus:outline-none focus:border-accent/50">
-            <option value="">All FY</option>
-            {fyOptions.map((fy) => (<option key={fy} value={fy}>FY{fy}</option>))}
-          </select>
-          <select value={fqFilter} onChange={(e) => setFqFilter(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-xs text-dark-200 focus:outline-none focus:border-accent/50">
-            <option value="">All FQ</option>
-            {fqOptions.map((fq) => (<option key={fq} value={fq}>Q{fq}</option>))}
+          <select value={fqComboFilter} onChange={(e) => setFqComboFilter(e.target.value)} className="bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-xs text-dark-200 focus:outline-none focus:border-accent/50">
+            <option value="">All FY/FQ</option>
+            {fqComboOptions.map((combo) => (<option key={combo} value={combo}>{combo}</option>))}
           </select>
         </div>
 
@@ -240,6 +248,7 @@ export function AccountList() {
             { key: 'journeyUsage', label: 'Journey' },
             { key: 'tasks', label: 'Tasks' },
             { key: 'pricePerPage', label: '$/Page' },
+            { key: 'lastMeeting', label: 'Last Meeting' },
           ].map((opt) => (
             <button
               key={opt.key}
@@ -258,7 +267,7 @@ export function AccountList() {
           ))}
           {hasAnyFilter && (
             <button
-              onClick={() => { setAeFilter(''); setSeFilter(''); setFqFilter(''); setFyFilter(''); setMeetingFilter(''); setSearch(''); }}
+              onClick={() => { setAeFilter(''); setSeFilter(''); setFqComboFilter(''); setMeetingFilter(''); setSearch(''); }}
               className="px-3 py-1.5 text-xs text-dark-500 hover:text-dark-300 flex items-center gap-1"
             >
               <X className="w-3 h-3" /> Clear all
@@ -400,10 +409,10 @@ export function AccountList() {
                     <span className="truncate">{account.stage}</span>
                   </>
                 )}
-                {(account.fiscalYear || account.fiscalQuarter) && (
+                {(account.fiscalYear && account.fiscalQuarter) && (
                   <>
                     <span className="text-dark-700">·</span>
-                    <span>FY{account.fiscalYear} Q{account.fiscalQuarter}</span>
+                    <span>{account.fiscalYear}-Q{account.fiscalQuarter}</span>
                   </>
                 )}
                 {account.meetingCadence && (

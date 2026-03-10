@@ -280,6 +280,18 @@ function processMeetingRecapWebhook(payload, log) {
     log('WARNING: GitHub issue creation failed: ' + githubError.message);
   }
   
+  // Step 6: Handle follow-up email draft
+  let followUpEmailResult = { drafted: false };
+  if (payload.followUpEmail) {
+    log('Step 6: Processing follow-up email...');
+    try {
+      followUpEmailResult = processFollowUpEmail(payload.followUpEmail, meetingRecapId, log);
+      log(`  Follow-up email draft: ${followUpEmailResult.drafted ? 'created' : 'skipped'}`);
+    } catch (emailError) {
+      log('WARNING: Follow-up email processing failed: ' + emailError.message);
+    }
+  }
+  
   return {
     action: 'created',
     meetingRecapId: meetingRecapId,
@@ -289,7 +301,8 @@ function processMeetingRecapWebhook(payload, log) {
     githubIssuesCreated: githubResult.created,
     githubIssuesSkipped: githubResult.skipped,
     contactsCreated: contactsResult.created,
-    contactsUpdated: contactsResult.updated
+    contactsUpdated: contactsResult.updated,
+    followUpEmailDrafted: followUpEmailResult.drafted
   };
 }
 
@@ -630,6 +643,7 @@ function writeMyActionItemsToSheet(actionItems, meetingRecapId, recap) {
     'GitHub Issue ID',
     'GitHub Issue Number',
     'Meeting Title',
+    'Account ID',
     'Account Name',
     'Created Date'
   ];
@@ -652,6 +666,21 @@ function writeMyActionItemsToSheet(actionItems, meetingRecapId, recap) {
       .setFontColor('#ffffff');
     
     sheet.setFrozenRows(1);
+  } else {
+    // Ensure Account ID column exists (backfill header for existing sheets)
+    const existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (existingHeaders.indexOf('Account ID') === -1) {
+      const accountNameColIdx = existingHeaders.indexOf('Account Name');
+      if (accountNameColIdx !== -1) {
+        sheet.insertColumnBefore(accountNameColIdx + 1);
+        sheet.getRange(1, accountNameColIdx + 1).setValue('Account ID');
+        sheet.getRange(1, accountNameColIdx + 1)
+          .setFontWeight('bold')
+          .setBackground('#34a853')
+          .setFontColor('#ffffff');
+        Logger.log('Added Account ID column to Meeting Action Items sheet');
+      }
+    }
   }
   
   // Create rows for each action item
@@ -664,6 +693,7 @@ function writeMyActionItemsToSheet(actionItems, meetingRecapId, recap) {
     '', // GitHub Issue ID - populated after creation
     '', // GitHub Issue Number - populated after creation
     recap.meetingTitle || '',
+    recap.accountId || '',
     recap.accountName || '',
     new Date()
   ]);
@@ -1312,6 +1342,309 @@ function processCloseTaskWebhook(payload) {
   } catch (error) {
     Logger.log('ERROR in processCloseTaskWebhook: ' + error.message);
     throw error;
+  }
+}
+
+/**
+ * Backfill Account ID on existing Meeting Action Items rows that have a blank Account ID.
+ * Joins through Meeting Recap ID -> Webhook Meeting Recaps -> Account ID.
+ * Also inserts the Account ID column header if it doesn't exist yet.
+ * Run this once after deploying the WebhookHandler fix.
+ */
+function backfillActionItemAccountIds() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const actionSheet = spreadsheet.getSheetByName(MEETING_ACTION_ITEMS_SHEET);
+  
+  if (!actionSheet || actionSheet.getLastRow() < 2) {
+    Logger.log('No data in Meeting Action Items sheet');
+    return;
+  }
+  
+  // Ensure Account ID column exists
+  const headerRow = actionSheet.getRange(1, 1, 1, actionSheet.getLastColumn()).getValues()[0];
+  let accountIdColIdx = headerRow.indexOf('Account ID'); // 0-based
+  if (accountIdColIdx === -1) {
+    const accountNameColIdx = headerRow.indexOf('Account Name');
+    const insertAt = accountNameColIdx !== -1 ? accountNameColIdx + 1 : headerRow.length; // 0-based insert position
+    actionSheet.insertColumnBefore(insertAt + 1); // sheets are 1-indexed
+    actionSheet.getRange(1, insertAt + 1).setValue('Account ID');
+    actionSheet.getRange(1, insertAt + 1)
+      .setFontWeight('bold')
+      .setBackground('#34a853')
+      .setFontColor('#ffffff');
+    accountIdColIdx = insertAt;
+    Logger.log(`Inserted Account ID column at position ${insertAt + 1}`);
+  }
+  
+  // Build recap ID -> Account ID map from Webhook Meeting Recaps
+  const recapsSheet = spreadsheet.getSheetByName(WEBHOOK_MEETING_RECAPS_SHEET);
+  const recapIdToAccount = new Map(); // recapId -> { accountId, accountName }
+  if (recapsSheet && recapsSheet.getLastRow() > 1) {
+    const recapsData = recapsSheet.getDataRange().getValues();
+    const rh = recapsData[0];
+    const rRecapIdx    = rh.indexOf('Meeting Recap ID');
+    const rAccountIdx  = rh.indexOf('Account ID');
+    const rNameIdx     = rh.indexOf('Account Name');
+    for (let i = 1; i < recapsData.length; i++) {
+      const rid = recapsData[i][rRecapIdx];
+      const aid = recapsData[i][rAccountIdx];
+      const aname = recapsData[i][rNameIdx];
+      if (rid && aid) recapIdToAccount.set(rid, { accountId: aid, accountName: aname || '' });
+    }
+  }
+  
+  // Re-read action items after potential column insert
+  const data = actionSheet.getDataRange().getValues();
+  const headers = data[0];
+  const recapIdIdx    = headers.indexOf('Meeting Recap ID');
+  const accountIdIdx  = headers.indexOf('Account ID');
+  
+  let fixed = 0, skipped = 0, unresolved = 0;
+  
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row[recapIdIdx]) continue;
+    if (row[accountIdIdx]) { skipped++; continue; }
+    
+    const account = recapIdToAccount.get(row[recapIdIdx]);
+    if (!account) { unresolved++; continue; }
+    
+    actionSheet.getRange(i + 1, accountIdIdx + 1).setValue(account.accountId);
+    fixed++;
+  }
+  
+  Logger.log(`Action items backfill: ${fixed} fixed, ${skipped} already had Account ID, ${unresolved} unresolved`);
+  SpreadsheetApp.getUi().alert(
+    'Backfill Complete',
+    `Action Items — Fixed: ${fixed}\nAlready had Account ID: ${skipped}\nCould not resolve: ${unresolved}`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Backfill Account ID / Account Name / Opportunity ID / Opportunity Name
+ * on any existing Webhook Meeting Recaps rows where Account ID is blank
+ * but External Attendees are present.
+ * 
+ * Run this manually from the Apps Script editor after fixing the domain mapping bug.
+ */
+function backfillMeetingRecapAccountIds() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(WEBHOOK_MEETING_RECAPS_SHEET);
+  
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('No data in Webhook Meeting Recaps sheet');
+    return;
+  }
+  
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  
+  const recapIdIdx      = headers.indexOf('Meeting Recap ID');
+  const accountIdIdx    = headers.indexOf('Account ID');
+  const accountNameIdx  = headers.indexOf('Account Name');
+  const oppIdIdx        = headers.indexOf('Opportunity ID');
+  const oppNameIdx      = headers.indexOf('Opportunity Name');
+  const mappedDomainIdx = headers.indexOf('Mapped Domain');
+  const externalIdx     = headers.indexOf('External Attendees');
+  const invitedIdx      = headers.indexOf('Invited Attendees');
+  const actualIdx       = headers.indexOf('Actual Attendees');
+  
+  if (accountIdIdx === -1 || externalIdx === -1) {
+    Logger.log('Required columns not found');
+    return;
+  }
+  
+  // Build maps once for efficiency
+  const domainToAccountMap = buildDomainToAccountMap();
+  const accountMap = buildAccountMap();
+  
+  let fixed = 0;
+  let skipped = 0;
+  let unresolved = 0;
+  
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const recapId = row[recapIdIdx];
+    
+    // Skip empty rows and rows that already have an Account ID
+    if (!recapId) continue;
+    if (row[accountIdIdx]) {
+      skipped++;
+      continue;
+    }
+    
+    // Collect all external email addresses from External, Invited, and Actual columns
+    const emailSources = [
+      externalIdx !== -1 ? String(row[externalIdx] || '') : '',
+      invitedIdx  !== -1 ? String(row[invitedIdx]  || '') : '',
+      actualIdx   !== -1 ? String(row[actualIdx]   || '') : ''
+    ];
+    
+    const allEmails = emailSources
+      .join(', ')
+      .split(/[,;\s]+/)
+      .map(e => e.trim().toLowerCase())
+      .filter(e => e.includes('@') && !e.includes('observepoint.com'));
+    
+    if (allEmails.length === 0) {
+      Logger.log(`Row ${i + 1} (${recapId}): no external emails found, cannot resolve`);
+      unresolved++;
+      continue;
+    }
+    
+    // Try each external email until we find a match
+    let accountInfo = null;
+    let mappedDomain = '';
+    for (const email of allEmails) {
+      accountInfo = findAccountByEmailCached(email, domainToAccountMap, accountMap);
+      if (accountInfo) {
+        mappedDomain = getEmailDomainForAccount(email);
+        break;
+      }
+    }
+    
+    if (!accountInfo) {
+      Logger.log(`Row ${i + 1} (${recapId}): no account match for emails: ${allEmails.join(', ')}`);
+      unresolved++;
+      continue;
+    }
+    
+    // Write the resolved account info back to the sheet
+    const rowNum = i + 1;
+    sheet.getRange(rowNum, accountIdIdx + 1).setValue(accountInfo.accountId || '');
+    sheet.getRange(rowNum, accountNameIdx + 1).setValue(accountInfo.accountName || '');
+    if (oppIdIdx !== -1)    sheet.getRange(rowNum, oppIdIdx + 1).setValue(accountInfo.opportunityId || '');
+    if (oppNameIdx !== -1)  sheet.getRange(rowNum, oppNameIdx + 1).setValue(accountInfo.opportunityName || '');
+    if (mappedDomainIdx !== -1) sheet.getRange(rowNum, mappedDomainIdx + 1).setValue(mappedDomain);
+    
+    Logger.log(`✓ Row ${i + 1} (${recapId}): resolved to ${accountInfo.accountName} (${accountInfo.accountId})`);
+    fixed++;
+  }
+  
+  Logger.log(`Backfill complete: ${fixed} fixed, ${skipped} already had Account ID, ${unresolved} unresolved`);
+  
+  SpreadsheetApp.getUi().alert(
+    'Backfill Complete',
+    `Fixed: ${fixed}\nAlready had Account ID: ${skipped}\nCould not resolve: ${unresolved}`,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Process the followUpEmail object from the webhook payload.
+ * Saves email metadata to the recap sheet and creates a Gmail draft.
+ * Does NOT send the email - only creates a draft for manual review.
+ * 
+ * @param {Object} followUpEmail - { subject, htmlBody, toEmails }
+ * @param {string} meetingRecapId - The meeting recap ID for reference
+ * @param {Function} log - Logging function
+ * @returns {Object} Result with drafted flag and draftId
+ */
+function processFollowUpEmail(followUpEmail, meetingRecapId, log) {
+  if (!log) log = Logger.log.bind(Logger);
+  
+  const subject = followUpEmail.subject || '';
+  const htmlBody = followUpEmail.htmlBody || '';
+  const toEmails = followUpEmail.toEmails || [];
+  
+  if (!subject || !htmlBody || toEmails.length === 0) {
+    log('Follow-up email missing required fields (subject, htmlBody, or toEmails)');
+    return { drafted: false, reason: 'missing_fields' };
+  }
+  
+  // Step 1: Save follow-up email data to the recap sheet
+  try {
+    saveFollowUpEmailToSheet(meetingRecapId, followUpEmail);
+    log('  Saved follow-up email data to recap sheet');
+  } catch (sheetErr) {
+    log('  WARNING: Failed to save follow-up email to sheet: ' + sheetErr.message);
+  }
+  
+  // Step 2: Create a Gmail draft (NOT send)
+  try {
+    const toField = toEmails.join(', ');
+    
+    const draft = GmailApp.createDraft(
+      toField,
+      subject,
+      '', // plain text body (empty since we use HTML)
+      {
+        htmlBody: htmlBody,
+        name: 'John Davis'
+      }
+    );
+    
+    const draftId = draft.getId();
+    log(`  Created Gmail draft: ${draftId}`);
+    log(`  To: ${toField}`);
+    log(`  Subject: ${subject}`);
+    
+    return { drafted: true, draftId: draftId };
+    
+  } catch (draftErr) {
+    log('ERROR: Failed to create Gmail draft: ' + draftErr.message);
+    return { drafted: false, reason: draftErr.message };
+  }
+}
+
+/**
+ * Save follow-up email metadata to additional columns on the Webhook Meeting Recaps sheet.
+ */
+function saveFollowUpEmailToSheet(meetingRecapId, followUpEmail) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(WEBHOOK_MEETING_RECAPS_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return;
+  
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const idIdx = headers.indexOf('Meeting Recap ID');
+  
+  // Ensure columns exist
+  let subjectIdx = headers.indexOf('Follow-Up Email Subject');
+  let toIdx = headers.indexOf('Follow-Up Email To');
+  let draftStatusIdx = headers.indexOf('Follow-Up Email Draft Status');
+  
+  const lastCol = sheet.getLastColumn();
+  
+  if (subjectIdx === -1) {
+    subjectIdx = lastCol;
+    sheet.getRange(1, subjectIdx + 1).setValue('Follow-Up Email Subject');
+    sheet.getRange(1, subjectIdx + 1)
+      .setFontWeight('bold')
+      .setBackground('#1a73e8')
+      .setFontColor('#ffffff');
+  }
+  if (toIdx === -1) {
+    toIdx = subjectIdx + 1;
+    if (headers.indexOf('Follow-Up Email To') === -1) {
+      sheet.getRange(1, toIdx + 1).setValue('Follow-Up Email To');
+      sheet.getRange(1, toIdx + 1)
+        .setFontWeight('bold')
+        .setBackground('#1a73e8')
+        .setFontColor('#ffffff');
+    }
+  }
+  if (draftStatusIdx === -1) {
+    draftStatusIdx = toIdx + 1;
+    if (headers.indexOf('Follow-Up Email Draft Status') === -1) {
+      sheet.getRange(1, draftStatusIdx + 1).setValue('Follow-Up Email Draft Status');
+      sheet.getRange(1, draftStatusIdx + 1)
+        .setFontWeight('bold')
+        .setBackground('#1a73e8')
+        .setFontColor('#ffffff');
+    }
+  }
+  
+  // Find the recap row and update
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][idIdx] === meetingRecapId) {
+      sheet.getRange(i + 1, subjectIdx + 1).setValue(followUpEmail.subject || '');
+      sheet.getRange(i + 1, toIdx + 1).setValue((followUpEmail.toEmails || []).join(', '));
+      sheet.getRange(i + 1, draftStatusIdx + 1).setValue('Draft Created');
+      Logger.log(`Saved follow-up email data on recap row ${i + 1}`);
+      break;
+    }
   }
 }
 

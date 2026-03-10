@@ -6,3 +6,9 @@
 
 # Logs
 *.log
+
+# Spreadsheets
+*.xlsx
+
+# Firebase
+.firebase/

@@ -201,11 +201,7 @@ function buildConsolidatedData(sourceData) {
     'Meeting Recaps',
     'Meeting Action Items',
     // Account notes (plain text, stripped of HTML)
-    'Account Notes',
-    // AI-generated summary (formula injected post-write)
-    'AI Engagement Summary',
-    // Hash of content-based inputs — used to skip AI() regeneration when nothing meaningful changed
-    'AI Prompt Hash'
+    'Account Notes'
   ];
   
   const rows = [headers];
@@ -325,11 +321,7 @@ function buildConsolidatedData(sourceData) {
       meetingRecapsJson,
       actionItemsJson,
       // Account notes plain text
-      accountNotesText,
-      // AI Engagement Summary - formula injected by writeAccountDataRaw after setValues
-      '',
-      // AI Prompt Hash - written by writeAccountDataRaw after setValues
-      ''
+      accountNotesText
     ]);
   }
   
@@ -517,6 +509,7 @@ function buildRenewalDetailMap(renewals) {
 
 /**
  * Build map of Account ID -> GitHub Task IDs
+ * Falls back to Account Name matching when Account ID column is blank.
  */
 function buildGitHubByAccountMap(github) {
   const map = new Map();
@@ -528,39 +521,74 @@ function buildGitHubByAccountMap(github) {
   
   const headers = github.headers;
   const accountIdIdx = headers.indexOf('Account ID');
+  const accountNameIdx = headers.indexOf('Account Name');
   const stateIdx = headers.indexOf('State');
   const statusIdx = headers.indexOf('Status');
   const titleIdx = headers.indexOf('Title');
   const createdAtIdx = headers.indexOf('Created At');
   const updatedAtIdx = headers.indexOf('Updated At');
   
-  for (let i = 1; i < github.data.length; i++) {
-    const row = github.data[i];
-    const accountId = row[accountIdIdx];
-    
-    if (accountId) {
-      if (!map.has(accountId)) {
-        map.set(accountId, []);
-      }
-      
-      const taskId = row[0];
-      const state = stateIdx !== -1 ? String(row[stateIdx] || '').toUpperCase() : '';
-      const status = statusIdx !== -1 ? row[statusIdx] : '';
-      const title = titleIdx !== -1 ? String(row[titleIdx] || '') : '';
-      const createdAt = createdAtIdx !== -1 ? row[createdAtIdx] : '';
-      const updatedAt = updatedAtIdx !== -1 ? row[updatedAtIdx] : '';
-      map.get(accountId).push({
-        taskId: taskId,
-        state: state,
-        status: status,
-        title: title,
-        createdAt: createdAt,
-        updatedAt: updatedAt
-      });
+  // Build Account Name -> Account ID lookup from Accounts Card Report for fallback
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const accountsSheet = spreadsheet.getSheetByName(ACCOUNTS_CARD_SHEET_NAME);
+  const nameToIdFallback = new Map();
+  if (accountsSheet) {
+    const accountsData = accountsSheet.getDataRange().getValues();
+    const aHeaders = accountsData[0];
+    const aIdIdx = aHeaders.indexOf('Id');
+    const aNameIdx = aHeaders.indexOf('Name');
+    for (let i = 1; i < accountsData.length; i++) {
+      const aId = accountsData[i][aIdIdx];
+      const aName = accountsData[i][aNameIdx];
+      if (aId && aName) nameToIdFallback.set(String(aName).trim(), String(aId).trim());
     }
   }
   
-  Logger.log(`Built GitHub map with ${map.size} accounts having tasks`);
+  let byId = 0;
+  let byName = 0;
+  let skipped = 0;
+  
+  for (let i = 1; i < github.data.length; i++) {
+    const row = github.data[i];
+    let accountId = accountIdIdx !== -1 ? row[accountIdIdx] : '';
+    
+    // Fallback: resolve Account ID from Account Name when ID column is blank
+    if (!accountId && accountNameIdx !== -1) {
+      const accountName = String(row[accountNameIdx] || '').trim();
+      if (accountName) {
+        accountId = nameToIdFallback.get(accountName) || '';
+        if (accountId) byName++;
+      }
+    } else if (accountId) {
+      byId++;
+    }
+    
+    if (!accountId) {
+      skipped++;
+      continue;
+    }
+    
+    if (!map.has(accountId)) {
+      map.set(accountId, []);
+    }
+    
+    const taskId = row[0];
+    const state = stateIdx !== -1 ? String(row[stateIdx] || '').toUpperCase() : '';
+    const status = statusIdx !== -1 ? row[statusIdx] : '';
+    const title = titleIdx !== -1 ? String(row[titleIdx] || '') : '';
+    const createdAt = createdAtIdx !== -1 ? row[createdAtIdx] : '';
+    const updatedAt = updatedAtIdx !== -1 ? row[updatedAtIdx] : '';
+    map.get(accountId).push({
+      taskId: taskId,
+      state: state,
+      status: status,
+      title: title,
+      createdAt: createdAt,
+      updatedAt: updatedAt
+    });
+  }
+  
+  Logger.log(`Built GitHub map with ${map.size} accounts having tasks (${byId} by ID, ${byName} by name fallback, ${skipped} unmatched)`);
   return map;
 }
 
@@ -987,6 +1015,7 @@ function buildMeetingRecapsByAccountMap(meetingRecaps) {
 
 /**
  * Build map of Account ID -> Meeting Action Item IDs (concatenated Meeting Recap ID + Action Item Index)
+ * Uses Account ID column directly when present; falls back to recap ID -> Account ID lookup.
  */
 function buildActionItemsByAccountMap(actionItems) {
   const map = new Map();
@@ -999,59 +1028,47 @@ function buildActionItemsByAccountMap(actionItems) {
   const headers = actionItems.headers;
   const recapIdIdx = headers.indexOf('Meeting Recap ID');
   const indexIdx = headers.indexOf('Action Item Index');
-  const accountNameIdx = headers.indexOf('Account Name');
+  const accountIdIdx = headers.indexOf('Account ID');
   
   if (recapIdIdx === -1 || indexIdx === -1) {
     Logger.log('Meeting Action Items sheet missing required columns');
     return map;
   }
   
-  // We need to get Account ID from the Meeting Recaps sheet
-  // First, build a map of Account Name -> Account ID from the action items
-  // But we need to match back to Account ID, so we'll use the recap ID to find the account
-  
-  // Load meeting recaps to get account IDs
+  // Build recap ID -> account ID fallback map from the already-loaded meetingRecaps source data
+  // to avoid a second full sheet read. Use the recaps data passed via loadSourceData().
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   const recapsSheet = spreadsheet.getSheetByName('Webhook Meeting Recaps');
-  
-  if (!recapsSheet) {
-    Logger.log('Webhook Meeting Recaps sheet not found for action items mapping');
-    return map;
-  }
-  
-  const recapsData = recapsSheet.getDataRange().getValues();
-  const recapsHeaders = recapsData[0];
-  const recapAccountIdIdx = recapsHeaders.indexOf('Account ID');
-  const recapRecapIdIdx = recapsHeaders.indexOf('Meeting Recap ID');
-  
-  // Build recap ID -> account ID map
   const recapIdToAccountId = new Map();
-  for (let i = 1; i < recapsData.length; i++) {
-    const recapId = recapsData[i][recapRecapIdIdx];
-    const accountId = recapsData[i][recapAccountIdIdx];
-    if (recapId && accountId) {
-      recapIdToAccountId.set(recapId, accountId);
+  
+  if (recapsSheet) {
+    const recapsData = recapsSheet.getDataRange().getValues();
+    const recapsHeaders = recapsData[0];
+    const recapAccountIdIdx = recapsHeaders.indexOf('Account ID');
+    const recapRecapIdIdx = recapsHeaders.indexOf('Meeting Recap ID');
+    for (let i = 1; i < recapsData.length; i++) {
+      const recapId = recapsData[i][recapRecapIdIdx];
+      const accountId = recapsData[i][recapAccountIdIdx];
+      if (recapId && accountId) recapIdToAccountId.set(recapId, accountId);
     }
   }
   
-  // Now build the action items map
   for (let i = 1; i < actionItems.data.length; i++) {
     const row = actionItems.data[i];
     const recapId = row[recapIdIdx];
     const actionIndex = row[indexIdx];
     
-    if (recapId !== undefined && recapId !== '' && actionIndex !== undefined && actionIndex !== '') {
-      const accountId = recapIdToAccountId.get(recapId);
-      
-      if (accountId) {
-        if (!map.has(accountId)) {
-          map.set(accountId, []);
-        }
-        // Concatenate Meeting Recap ID + Action Item Index
-        const actionItemId = `${recapId}_${actionIndex}`;
-        map.get(accountId).push(actionItemId);
-      }
-    }
+    if (!recapId && recapId !== 0) continue;
+    if (actionIndex === undefined || actionIndex === '') continue;
+    
+    // Prefer direct Account ID column; fall back to recap lookup
+    let accountId = accountIdIdx !== -1 ? row[accountIdIdx] : '';
+    if (!accountId) accountId = recapIdToAccountId.get(recapId) || '';
+    
+    if (!accountId) continue;
+    
+    if (!map.has(accountId)) map.set(accountId, []);
+    map.get(accountId).push(`${recapId}_${actionIndex}`);
   }
   
   Logger.log(`Built action items map with ${map.size} accounts having action items`);
@@ -1265,33 +1282,6 @@ function analyzeCellSizes(data) {
 }
 
 /**
- * Compute a stable hash string from the content-based fields that drive the AI summary.
- * Excludes purely time-derived fields (days since last contact, 30d/90d email counts).
- */
-function computeAiPromptHash(row, findCol) {
-  const fields = [
-    'Recent Email Snippets',
-    'Recent Task Summaries',
-    'Recent Recap Summaries',
-    'Engagement Score',
-    'GitHub Tasks (Open)',
-    'Meetings (Future)',
-    'Next Meeting Date',
-    'Meeting Recaps Count',
-    'Action Items Count',
-    'Stage',
-    'CSM'
-  ];
-  const content = fields.map(name => {
-    const idx = findCol(name);
-    return idx > 0 ? String(row[idx - 1] || '') : '';
-  }).join('|');
-  
-  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, content);
-  return bytes.map(b => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
-}
-
-/**
  * Write consolidated data to sheet
  */
 function writeAccountDataRaw(data) {
@@ -1300,29 +1290,6 @@ function writeAccountDataRaw(data) {
   
   if (!sheet) {
     sheet = spreadsheet.insertSheet(ACCOUNT_DATA_RAW_SHEET);
-  }
-  
-  // Before clearing, snapshot existing AI formulas and hashes keyed by Account Name
-  // so we can skip regenerating AI() for rows whose content hasn't changed
-  const aiCache = new Map(); // accountName -> { formula, hash }
-  if (sheet.getLastRow() > 1) {
-    const existingData = sheet.getDataRange().getValues();
-    const exHeaders = existingData[0];
-    const exAccountCol = exHeaders.indexOf('Account Name');
-    const exAiCol = exHeaders.indexOf('AI Engagement Summary');
-    const exHashCol = exHeaders.indexOf('AI Prompt Hash');
-    if (exAccountCol !== -1 && exAiCol !== -1) {
-      const existingFormulas = sheet.getRange(2, exAiCol + 1, existingData.length - 1, 1).getFormulas();
-      for (let i = 1; i < existingData.length; i++) {
-        const accountName = String(existingData[i][exAccountCol] || '');
-        const existingFormula = existingFormulas[i - 1][0] || '';
-        const existingHash = exHashCol !== -1 ? String(existingData[i][exHashCol] || '') : '';
-        if (accountName) {
-          aiCache.set(accountName, { formula: existingFormula, hash: existingHash });
-        }
-      }
-    }
-    Logger.log(`AI cache loaded: ${aiCache.size} existing entries`);
   }
   
   sheet.clear();
@@ -1425,101 +1392,6 @@ function writeAccountDataRaw(data) {
       }
     }
     
-    // Inject AI() formulas into the AI Engagement Summary column.
-    // AI() only accepts a single string literal — no cell refs, no nested functions.
-    // We build the full prompt string in Apps Script from the data array and embed it inline.
-    const aiSummaryCol = findCol('AI Engagement Summary');
-    if (aiSummaryCol > 0 && data.length > 1) {
-      Logger.log(`Injecting AI() formulas into column ${aiSummaryCol}...`);
-      
-      // Pre-compute 0-based data indices for all fields we need
-      const di = {};
-      [
-        'Account Name', 'Renewal Date', 'Stage', 'CSM',
-        'Engagement Score', 'Days Since Last Contact',
-        'Email Count (30d)', 'Email Count (90d)',
-        'Meetings (Past)', 'Meetings (Future)', 'Meetings (30d)',
-        'Last Meeting Date', 'Next Meeting Date',
-        'GitHub Tasks (Open)',
-        'Meeting Recaps Count', 'Action Items Count',
-        'Recent Email Snippets', 'Recent Task Summaries', 'Recent Recap Summaries'
-      ].forEach(name => {
-        const idx = findCol(name);
-        if (idx > 0) di[name] = idx - 1; // convert to 0-based
-      });
-      
-      // Helper: safely get a string value from the data row
-      const val = (row, name) => {
-        if (di[name] === undefined) return '';
-        const v = row[di[name]];
-        if (v === null || v === undefined) return '';
-        if (v instanceof Date) return v.toISOString().substring(0, 10);
-        return String(v);
-      };
-      
-      // Helper: escape double-quotes for embedding inside =AI("...")
-      const esc = (s) => s.replace(/"/g, '""');
-      
-      const aiHashCol = findCol('AI Prompt Hash');
-      const aiFormulas = [];   // [formula | ''] per data row
-      const aiHashes = [];     // new hash per data row
-      let regenerated = 0;
-      let reused = 0;
-      
-      for (let i = 1; i < data.length; i++) {
-        const row = data[i];
-        const accountName = val(row, 'Account Name');
-        
-        // Compute hash from content-based fields only (excludes time-only fields)
-        const newHash = computeAiPromptHash(row, findCol);
-        aiHashes.push([newHash]);
-        
-        // Check cache: if hash matches and a formula already exists, reuse it
-        const cached = aiCache.get(accountName);
-        if (cached && cached.hash === newHash && cached.formula) {
-          aiFormulas.push([cached.formula]);
-          reused++;
-          continue;
-        }
-        
-        // Hash changed or no prior formula — build a fresh AI() prompt
-        const prompt = esc(
-          'You are a customer success manager reviewing account health. ' +
-          'Write a 3-4 sentence engagement summary for: ' + val(row, 'Account Name') + '\n' +
-          'Renewal: ' + val(row, 'Renewal Date') +
-          ' | Stage: ' + val(row, 'Stage') +
-          ' | CSM: ' + val(row, 'CSM') +
-          ' | Engagement Score: ' + val(row, 'Engagement Score') + '/100' +
-          ' | Days since last contact: ' + val(row, 'Days Since Last Contact') +
-          ' | Emails 30d/90d: ' + val(row, 'Email Count (30d)') + '/' + val(row, 'Email Count (90d)') +
-          ' | Meetings past/future/30d: ' + val(row, 'Meetings (Past)') + '/' + val(row, 'Meetings (Future)') + '/' + val(row, 'Meetings (30d)') +
-          ' | Last meeting: ' + val(row, 'Last Meeting Date') +
-          ' | Next meeting: ' + val(row, 'Next Meeting Date') +
-          ' | Open tasks: ' + val(row, 'GitHub Tasks (Open)') +
-          ' | Recaps: ' + val(row, 'Meeting Recaps Count') +
-          ' | Action items: ' + val(row, 'Action Items Count') + '\n\n' +
-          '--- RECENT EMAILS (newest first) ---\n' + val(row, 'Recent Email Snippets') + '\n\n' +
-          '--- OPEN/RECENT GITHUB TASKS ---\n' + val(row, 'Recent Task Summaries') + '\n\n' +
-          '--- RECENT MEETING RECAPS ---\n' + val(row, 'Recent Recap Summaries') + '\n\n' +
-          'Based on all of the above, describe the engagement level, call out any concerns ' +
-          '(e.g. no recent contact, low score, no future meetings booked, overdue action items), ' +
-          'and suggest one specific next step.'
-        );
-        
-        aiFormulas.push([`=AI("${prompt}")`]);
-        regenerated++;
-      }
-      
-      // Batch write formulas and hashes
-      if (aiFormulas.length > 0) {
-        sheet.getRange(2, aiSummaryCol, aiFormulas.length, 1).setFormulas(aiFormulas);
-      }
-      if (aiHashCol > 0 && aiHashes.length > 0) {
-        sheet.getRange(2, aiHashCol, aiHashes.length, 1).setValues(aiHashes);
-      }
-      Logger.log(`AI() formulas: ${regenerated} regenerated, ${reused} reused from cache (hash unchanged)`);
-    }
-    
     // Auto-resize columns
     for (let i = 1; i <= data[0].length; i++) {
       sheet.autoResizeColumn(i);
@@ -1528,11 +1400,6 @@ function writeAccountDataRaw(data) {
       if (currentWidth > 500) {
         sheet.setColumnWidth(i, 500);
       }
-    }
-    
-    // Set AI Engagement Summary column to a fixed wider width for readability
-    if (findCol('AI Engagement Summary') > 0) {
-      sheet.setColumnWidth(findCol('AI Engagement Summary'), 400);
     }
     
     // Set all data rows to single-line height

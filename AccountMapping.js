@@ -29,19 +29,22 @@ function buildOpportunityToAccountMap() {
   const renewalHeaders = renewalData[0];
   const linkColIndex = renewalHeaders.indexOf('Link to SF Opportunity');
   
-  // Extract opportunity names from hyperlinks like "2026 - REN - Torrid"
-  const activeOpportunityNames = new Set();
+  // Extract active opportunity IDs from the Renewal Opportunities link column.
+  // Handles both plain URLs and =HYPERLINK() formulas.
+  const activeOpportunityIds = new Set();
   for (let i = 1; i < renewalData.length; i++) {
     const linkCell = renewalData[i][linkColIndex];
     if (linkCell) {
-      const oppName = extractOpportunityNameFromLink(linkCell);
-      if (oppName) {
-        activeOpportunityNames.add(oppName);
+      const oppId = extractOpportunityIdFromLink(linkCell);
+      if (oppId) {
+        activeOpportunityIds.add(oppId);
       }
     }
   }
   
-  // Get Opptys Report to map Opportunity Name -> Opportunity ID
+  Logger.log(`Found ${activeOpportunityIds.size} active opportunity IDs in Renewal Opportunities`);
+  
+  // Get Opptys Report to map Opportunity ID -> Opportunity Name
   const opptysSheet = spreadsheet.getSheetByName(OPPTYS_REPORT_SHEET_NAME);
   if (!opptysSheet) {
     Logger.log('Opptys Report sheet not found');
@@ -53,12 +56,12 @@ function buildOpportunityToAccountMap() {
   const oppIdIndex = opptysHeaders.indexOf('Id');
   const oppNameIndex = opptysHeaders.indexOf('Name');
   
-  const oppNameToId = new Map();
+  const oppIdToName = new Map();
   for (let i = 1; i < opptysData.length; i++) {
     const oppId = opptysData[i][oppIdIndex];
     const oppName = opptysData[i][oppNameIndex];
     if (oppId && oppName) {
-      oppNameToId.set(oppName, oppId);
+      oppIdToName.set(oppId, oppName);
     }
   }
   
@@ -93,11 +96,10 @@ function buildOpportunityToAccountMap() {
   
   // Now build the final map: only include accounts with active opportunities
   const result = new Map();
-  for (const oppName of activeOpportunityNames) {
-    const oppId = oppNameToId.get(oppName);
-    if (oppId && oppIdToAccount.has(oppId)) {
+  for (const oppId of activeOpportunityIds) {
+    if (oppIdToAccount.has(oppId)) {
       const accountInfo = oppIdToAccount.get(oppId);
-      accountInfo.opportunityName = oppName;
+      accountInfo.opportunityName = oppIdToName.get(oppId) || '';
       result.set(oppId, accountInfo);
     }
   }
@@ -139,6 +141,35 @@ function extractOpportunityNameFromLink(linkCell) {
   }
   
   return null;
+}
+
+/**
+ * Extract Salesforce opportunity ID from a link cell.
+ * Handles both plain URLs and =HYPERLINK() formulas.
+ * e.g., "https://...salesforce.com/006VH00000hSNozYAG" -> "006VH00000hSNozYAG"
+ * e.g., =HYPERLINK("https://...salesforce.com/006VH00000hSNozYAG", "2027 - REN - Acme") -> "006VH00000hSNozYAG"
+ */
+function extractOpportunityIdFromLink(linkCell) {
+  if (!linkCell) return null;
+  
+  let url = null;
+  
+  if (typeof linkCell === 'string') {
+    // Check if it's a HYPERLINK formula — extract the URL from the first argument
+    const hyperlinkMatch = linkCell.match(/=HYPERLINK\s*\(\s*"([^"]+)"/i);
+    if (hyperlinkMatch) {
+      url = hyperlinkMatch[1];
+    } else {
+      // Plain URL
+      url = linkCell;
+    }
+  }
+  
+  if (!url) return null;
+  
+  // Extract the Salesforce ID (15 or 18 char alphanumeric) from the end of the URL path
+  const idMatch = url.match(/\/([a-zA-Z0-9]{15,18})(?:[\/\?#]|$)/);
+  return idMatch ? idMatch[1] : null;
 }
 
 /**

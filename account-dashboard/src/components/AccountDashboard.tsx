@@ -81,6 +81,11 @@ export function AccountDashboard() {
   const scoreLevel = getScoreLevel(account.engagementScore);
   const statusClass = getStatusClass(account.status);
 
+  const safeCount = (n: number) => {
+    if (n == null || n < 0 || n > 999999 || isNaN(n)) return 0;
+    return n;
+  };
+
   const formatDate = (d: string | null) => {
     if (!d) return '—';
     try {
@@ -151,6 +156,31 @@ export function AccountDashboard() {
         </div>
       </div>
 
+      {/* Team Cards - CSM, AE, Sales Engineer */}
+      <div className="flex gap-3 mb-4">
+        <div className="flex-1 bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3">
+          <div className="flex items-center gap-1.5 text-indigo-400/70 mb-1">
+            <Users className="w-4 h-4" />
+            <span className="text-[11px] uppercase tracking-wider">CSM</span>
+          </div>
+          <div className="text-sm font-semibold text-dark-100 truncate">{account.csm || '—'}</div>
+        </div>
+        <div className="flex-1 bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3">
+          <div className="flex items-center gap-1.5 text-indigo-400/70 mb-1">
+            <Shield className="w-4 h-4" />
+            <span className="text-[11px] uppercase tracking-wider">AE</span>
+          </div>
+          <div className="text-sm font-semibold text-dark-100 truncate">{account.ae || '—'}</div>
+        </div>
+        <div className="flex-1 bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3">
+          <div className="flex items-center gap-1.5 text-indigo-400/70 mb-1">
+            <Briefcase className="w-4 h-4" />
+            <span className="text-[11px] uppercase tracking-wider">Sales Engineer</span>
+          </div>
+          <div className="text-sm font-semibold text-dark-100 truncate">{account.salesEngineer || '—'}</div>
+        </div>
+      </div>
+
       {/* Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3 mb-6">
         <MetricCard
@@ -192,19 +222,9 @@ export function AccountDashboard() {
           value={account.journeyUsage ? formatPct(account.journeyUsage) : '—'}
         />
         <MetricCard
-          icon={<Users className="w-4 h-4" />}
-          label="CSM"
-          value={account.csm || '—'}
-        />
-        <MetricCard
-          icon={<Shield className="w-4 h-4" />}
-          label="AE"
-          value={account.ae || '—'}
-        />
-        <MetricCard
           icon={<Mail className="w-4 h-4" />}
           label="Emails (30d / Total)"
-          value={`${account.emailCount30d} / ${account.emailCountTotal}`}
+          value={`${safeCount(account.emailCount30d)} / ${safeCount(account.emailCountTotal)}`}
         />
         <MetricCard
           icon={<Video className="w-4 h-4" />}
@@ -229,17 +249,12 @@ export function AccountDashboard() {
         <MetricCard
           icon={<Hash className="w-4 h-4" />}
           label="FY / FQ"
-          value={account.fiscalYear ? `FY${account.fiscalYear} Q${account.fiscalQuarter}` : '—'}
+          value={account.fiscalYear && account.fiscalQuarter ? `${account.fiscalYear}-Q${account.fiscalQuarter}` : '—'}
         />
         <MetricCard
           icon={<DollarSign className="w-4 h-4" />}
           label="Price Per Page"
           value={account.pricePerPage ? `$${account.pricePerPage}` : '—'}
-        />
-        <MetricCard
-          icon={<Briefcase className="w-4 h-4" />}
-          label="Sales Engineer"
-          value={account.salesEngineer || '—'}
         />
       </div>
 
@@ -283,12 +298,22 @@ export function AccountDashboard() {
 
       {/* Main Content: Notes + Data Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column: Global Notes, Success Criteria, Account Notes, Contacts */}
+        {/* Left Column: Global Notes, Account Notes, Contacts, Success Criteria */}
         <div className="space-y-6">
           <GlobalNotesEditor
             content={globalNotes.content}
             lastSaved={globalNotes.lastSaved}
             onSave={updateGlobalNotes}
+          />
+          <NotesEditor
+            content={account.notes?.content || ''}
+            lastSaved={account.notes?.lastSaved || null}
+            onSave={updateNotes}
+            accountId={account.accountId}
+          />
+          <ContactRoster
+            contacts={account.contacts || []}
+            onUpdateContactNotes={updateContactNotes}
           />
           <SuccessCriteriaEditor
             content={account.successCriteria?.content || ''}
@@ -296,15 +321,6 @@ export function AccountDashboard() {
             onSave={updateSuccessCriteria}
             accountName={account.accountName}
             accountId={account.accountId}
-          />
-          <NotesEditor
-            content={account.notes?.content || ''}
-            lastSaved={account.notes?.lastSaved || null}
-            onSave={updateNotes}
-          />
-          <ContactRoster
-            contacts={account.contacts || []}
-            onUpdateContactNotes={updateContactNotes}
           />
         </div>
 

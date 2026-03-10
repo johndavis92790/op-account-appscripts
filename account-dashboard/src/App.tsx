@@ -1,14 +1,29 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { AccountList } from './components/AccountList';
 import { AccountDashboard } from './components/AccountDashboard';
 import { SuccessCriteriaPage } from './components/SuccessCriteriaPage';
 import { EmailDomainsPage } from './components/EmailDomainsPage';
+import { UserManagement } from './components/UserManagement';
 import { LoginPage } from './components/LoginPage';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, Shield } from 'lucide-react';
+
+function AdminUsersLink() {
+  const navigate = useNavigate();
+  return (
+    <button
+      onClick={() => navigate('/admin/users')}
+      className="flex items-center gap-1.5 text-dark-400 hover:text-dark-200 text-sm px-3 py-1.5 rounded-lg hover:bg-dark-800 transition-colors"
+      title="User Management"
+    >
+      <Shield className="w-4 h-4" />
+      <span className="hidden sm:inline">Users</span>
+    </button>
+  );
+}
 
 export default function App() {
-  const { user, loading, error, signIn, signOut } = useAuth();
+  const { user, loading, error, role, signIn, signOut } = useAuth();
 
   if (loading) {
     return (
@@ -36,6 +51,9 @@ export default function App() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {role === 'admin' && (
+              <AdminUsersLink />
+            )}
             <span className="text-dark-400 text-sm hidden sm:block">
               {user.email}
             </span>
@@ -55,6 +73,7 @@ export default function App() {
           <Route path="/account/:accountId" element={<AccountDashboard />} />
           <Route path="/account/:accountId/success-criteria" element={<SuccessCriteriaPage />} />
           <Route path="/domains" element={<EmailDomainsPage />} />
+          <Route path="/admin/users" element={<UserManagement currentUserEmail={user.email || ''} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

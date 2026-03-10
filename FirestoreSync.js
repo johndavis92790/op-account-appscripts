@@ -186,8 +186,10 @@ function buildFirestoreDocument(row, headers, accountId, accountName, sources) {
   
   const toNum = (v) => {
     if (v === null || v === undefined || v === '') return 0;
+    if (v instanceof Date) return 0;
     const n = Number(v);
-    return isNaN(n) ? 0 : n;
+    if (isNaN(n) || n < -999999 || n > 999999) return 0;
+    return n;
   };
   
   // Resolve task IDs to full task objects

@@ -2,12 +2,34 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only allow authenticated user john.davis@observepoint.com
+    // Check if user is authenticated and exists in users collection
     function isAuthorized() {
-      return request.auth != null && request.auth.token.email == 'john.davis@observepoint.com';
+      return request.auth != null
+        && request.auth.token.email.matches('.*@observepoint\\.com$')
+        && exists(/databases/$(database)/documents/users/$(request.auth.token.email));
     }
 
-    // Account documents - read/write for authorized user
+    // Check if user is an admin
+    function isAdmin() {
+      return isAuthorized()
+        && get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.role == 'admin';
+    }
+
+    // Users collection - admins can read/write, authorized users can read their own doc
+    match /users/{userEmail} {
+      allow read: if isAuthorized();
+      allow write: if isAdmin();
+      // Allow bootstrap: john.davis@observepoint.com can create their own doc
+      allow create: if request.auth != null
+        && request.auth.token.email == userEmail
+        && request.auth.token.email == 'john.davis@observepoint.com';
+      // Allow any authorized user to update their own lastLogin
+      allow update: if request.auth != null
+        && request.auth.token.email == userEmail
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLogin']);
+    }
+
+    // Account documents - read/write for authorized users
     match /accounts/{accountId} {
       allow read, write: if isAuthorized();
 

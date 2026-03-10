@@ -20,7 +20,7 @@ interface ContactRosterProps {
 
 export function ContactRoster({ contacts, onUpdateContactNotes }: ContactRosterProps) {
   const [expanded, setExpanded] = useState(true);
-  const [expandedContact, setExpandedContact] = useState<string | null>(null);
+  const [collapsedContacts, setCollapsedContacts] = useState<Set<string>>(new Set());
   const [savingEmail, setSavingEmail] = useState<string | null>(null);
   const [savedEmail, setSavedEmail] = useState<string | null>(null);
   const saveTimeouts = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -87,12 +87,17 @@ export function ContactRoster({ contacts, onUpdateContactNotes }: ContactRosterP
           )}
 
           {contacts.map((contact) => {
-            const isContactExpanded = expandedContact === contact.email;
+            const isContactExpanded = !collapsedContacts.has(contact.email);
 
             return (
               <div key={contact.email} className="border-b border-dark-700/30">
                 <button
-                  onClick={() => setExpandedContact(isContactExpanded ? null : contact.email)}
+                  onClick={() => setCollapsedContacts(prev => {
+                    const next = new Set(prev);
+                    if (next.has(contact.email)) next.delete(contact.email);
+                    else next.add(contact.email);
+                    return next;
+                  })}
                   className="w-full px-4 py-2.5 hover:bg-dark-800/50 text-left"
                 >
                   <div className="flex items-start justify-between gap-2">
