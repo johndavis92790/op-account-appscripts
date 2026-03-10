@@ -17,7 +17,10 @@ service cloud.firestore {
 
     // Users collection - admins can read/write, authorized users can read their own doc
     match /users/{userEmail} {
-      allow read: if isAuthorized();
+      // Allow any authenticated @observepoint.com user to read their own doc (needed for bootstrap auth check)
+      // Authorized users can read all user docs (needed for admin panel)
+      allow read: if isAuthorized()
+        || (request.auth != null && request.auth.token.email == userEmail && request.auth.token.email.matches('.*@observepoint\\.com$'));
       allow write: if isAdmin();
       // Allow bootstrap: john.davis@observepoint.com can create their own doc
       allow create: if request.auth != null

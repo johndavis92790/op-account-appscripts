@@ -92,11 +92,12 @@ export function useAuth() {
         });
       } catch (err) {
         console.error('Auth check failed:', err);
+        await firebaseSignOut(auth);
         setState({
-          user,
+          user: null,
           loading: false,
-          error: null,
-          role: 'viewer',
+          error: 'Authorization check failed. Please try again.',
+          role: null,
         });
       }
     });
