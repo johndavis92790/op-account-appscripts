@@ -46,5 +46,40 @@ service cloud.firestore {
     match /settings/{docId} {
       allow read, write: if isAuthorized();
     }
+
+    // Tasks - top-level collection (replaces GitHub Project items)
+    // See /TASKS_DATA_MODEL.md for schema.
+    match /tasks/{taskId} {
+      allow read, write: if isAuthorized();
+
+      // Comments are read/write for any authorized user.
+      match /comments/{commentId} {
+        allow read, write: if isAuthorized();
+      }
+
+      // Activity is append-only audit log. Clients can create entries but
+      // never modify or delete them. Apps Script writes via service account
+      // and bypasses these rules.
+      match /activity/{activityId} {
+        allow read: if isAuthorized();
+        allow create: if isAuthorized();
+        allow update, delete: if false;
+      }
+    }
+
+    // Task configuration documents (saved views, shared enum overrides, etc.)
+    match /taskConfig/{docId} {
+      allow read, write: if isAuthorized();
+
+      match /views/{viewId} {
+        allow read, write: if isAuthorized();
+      }
+    }
+
+    // Task labels - global, shared across all tasks. Any authorized user can
+    // create / rename / recolor / delete. Tasks reference labels via labelIds[].
+    match /taskLabels/{labelId} {
+      allow read, write: if isAuthorized();
+    }
   }
 }

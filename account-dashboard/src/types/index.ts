@@ -77,6 +77,8 @@ export interface Account {
 
   // Metadata
   lastSynced: string;
+  isActive: boolean;
+  deactivatedAt: string | null;
 }
 
 export interface AccountListItem {
@@ -104,6 +106,8 @@ export interface AccountListItem {
   pricePerPage: number;
   salesEngineer: string;
   emailDomains: string;
+  isActive: boolean;
+  deactivatedAt: string | null;
 }
 
 export interface Task {

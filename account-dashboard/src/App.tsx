@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { AccountList } from './components/AccountList';
 import { AccountDashboard } from './components/AccountDashboard';
@@ -6,7 +6,8 @@ import { SuccessCriteriaPage } from './components/SuccessCriteriaPage';
 import { EmailDomainsPage } from './components/EmailDomainsPage';
 import { UserManagement } from './components/UserManagement';
 import { LoginPage } from './components/LoginPage';
-import { BarChart3, Shield } from 'lucide-react';
+import { TasksPage } from './components/tasks/TasksPage';
+import { BarChart3, Shield, ListChecks } from 'lucide-react';
 
 function AdminUsersLink() {
   const navigate = useNavigate();
@@ -18,6 +19,26 @@ function AdminUsersLink() {
     >
       <Shield className="w-4 h-4" />
       <span className="hidden sm:inline">Users</span>
+    </button>
+  );
+}
+
+function TasksLink() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const active = location.pathname.startsWith('/tasks');
+  return (
+    <button
+      onClick={() => navigate('/tasks')}
+      className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-colors ${
+        active
+          ? 'text-accent bg-accent/10'
+          : 'text-dark-400 hover:text-dark-200 hover:bg-dark-800'
+      }`}
+      title="Tasks"
+    >
+      <ListChecks className="w-4 h-4" />
+      <span className="hidden sm:inline">Tasks</span>
     </button>
   );
 }
@@ -44,13 +65,18 @@ export default function App() {
     <div className="min-h-screen bg-dark-900">
       <header className="sticky top-0 z-50 bg-dark-950/80 backdrop-blur-xl border-b border-dark-700/50">
         <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <BarChart3 className="w-6 h-6 text-accent" />
-            <span className="font-semibold text-dark-100 text-lg hidden sm:block">
+          <Link
+            to="/"
+            className="flex items-center gap-3 group"
+            title="Back to all accounts"
+          >
+            <BarChart3 className="w-6 h-6 text-accent group-hover:text-accent-hover transition-colors" />
+            <span className="font-semibold text-dark-100 text-lg hidden sm:block group-hover:text-accent transition-colors">
               OP Accounts
             </span>
-          </div>
+          </Link>
           <div className="flex items-center gap-3">
+            <TasksLink />
             {role === 'admin' && (
               <AdminUsersLink />
             )}
@@ -72,6 +98,7 @@ export default function App() {
           <Route path="/" element={<AccountList />} />
           <Route path="/account/:accountId" element={<AccountDashboard />} />
           <Route path="/account/:accountId/success-criteria" element={<SuccessCriteriaPage />} />
+          <Route path="/tasks" element={<TasksPage />} />
           <Route path="/domains" element={<EmailDomainsPage />} />
           <Route path="/admin/users" element={<UserManagement currentUserEmail={user.email || ''} />} />
           <Route path="*" element={<Navigate to="/" replace />} />

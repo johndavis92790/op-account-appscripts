@@ -211,18 +211,17 @@ function processMeetingRecapWebhook(payload, log) {
     log('WARNING: Contacts processing failed: ' + contactsError.message);
   }
   
-  // Store attendee details on the recap row (always runs)
-  log('Storing attendee details on recap row...');
-  try {
-    storeAttendeeDetailsOnRecap(meetingRecapId, payload);
-    log('Attendee details stored successfully');
-  } catch (attendeeError) {
-    log('WARNING: Attendee details storage failed: ' + attendeeError.message);
-  }
-  
   // Check for duplicate meeting recap — skip the rest if duplicate
   const isDuplicate = isMeetingRecapDuplicate(meetingRecapId);
   if (isDuplicate) {
+    // Still store attendee details on duplicate recaps (row already exists)
+    log('Storing attendee details on existing recap row...');
+    try {
+      storeAttendeeDetailsOnRecap(meetingRecapId, payload);
+      log('Attendee details stored successfully');
+    } catch (attendeeError) {
+      log('WARNING: Attendee details storage failed: ' + attendeeError.message);
+    }
     log(`⏭️ Duplicate meeting recap — skipping recap/action items/GitHub steps`);
     return {
       action: 'skipped_duplicate',
@@ -236,6 +235,15 @@ function processMeetingRecapWebhook(payload, log) {
   // Step 1: Write the meeting recap to sheet
   log('Step 1: Writing meeting recap to sheet...');
   writeMeetingRecapToSheet(recap);
+  
+  // Step 1.5: Store attendee details on the recap row (AFTER row is written)
+  log('Storing attendee details on recap row...');
+  try {
+    storeAttendeeDetailsOnRecap(meetingRecapId, payload);
+    log('Attendee details stored successfully');
+  } catch (attendeeError) {
+    log('WARNING: Attendee details storage failed: ' + attendeeError.message);
+  }
   
   // Step 2: Store action items in separate tables
   log('Step 2: Writing action items...');
@@ -261,23 +269,21 @@ function processMeetingRecapWebhook(payload, log) {
     log('WARNING: Calendar matching failed: ' + matchError.message);
   }
   
-  // Step 4: Import existing GitHub tasks for duplicate detection
-  log('Step 4: Importing GitHub tasks...');
+  // Step 4: (deprecated) GitHub task import — kept off after Phase 3 cutover.
+  // The legacy `importGitHubTasks()` populated a separate sheet used for
+  // duplicate detection against GitHub Project items. The new system writes
+  // straight to Firestore and tracks idempotency via the "Firestore Task ID"
+  // column on Meeting Action Items, so this step is no longer needed.
+  // (Kept as a comment so the call graph is documented; deleted in Phase 6.)
+
+  // Step 5: Create Firestore tasks from my action items (HARD CUTOVER — Phase 3)
+  log('Step 5: Creating Firestore tasks from action items...');
+  let taskResult = { created: 0, skipped: 0, errors: 0 };
   try {
-    importGitHubTasks();
-    log('  GitHub task import complete');
-  } catch (githubImportError) {
-    log('WARNING: GitHub task import failed: ' + githubImportError.message);
-  }
-  
-  // Step 5: Create GitHub issues from my action items
-  log('Step 5: Creating GitHub issues...');
-  let githubResult = { created: 0, skipped: 0, errors: 0 };
-  try {
-    githubResult = createGitHubIssuesFromActionItems(meetingRecapId, recap);
-    log(`  GitHub issues: ${githubResult.created} created, ${githubResult.skipped} skipped, ${githubResult.errors} errors`);
-  } catch (githubError) {
-    log('WARNING: GitHub issue creation failed: ' + githubError.message);
+    taskResult = createFirestoreTasksFromActionItems(meetingRecapId, recap);
+    log(`  Firestore tasks: ${taskResult.created} created, ${taskResult.skipped} skipped, ${taskResult.errors} errors`);
+  } catch (taskError) {
+    log('WARNING: Firestore task creation failed: ' + taskError.message);
   }
   
   // Step 6: Handle follow-up email draft
@@ -298,8 +304,9 @@ function processMeetingRecapWebhook(payload, log) {
     meetingTitle: recap.meetingTitle,
     myActionItems: myActionItemsResult.count,
     othersActionItems: othersActionItemsResult.count,
-    githubIssuesCreated: githubResult.created,
-    githubIssuesSkipped: githubResult.skipped,
+    firestoreTasksCreated: taskResult.created,
+    firestoreTasksSkipped: taskResult.skipped,
+    firestoreTasksErrors: taskResult.errors,
     contactsCreated: contactsResult.created,
     contactsUpdated: contactsResult.updated,
     followUpEmailDrafted: followUpEmailResult.drafted
@@ -682,34 +689,56 @@ function writeMyActionItemsToSheet(actionItems, meetingRecapId, recap) {
       }
     }
   }
-  
-  // Create rows for each action item
-  const rows = actionItems.map((item, index) => [
-    meetingRecapId,
-    index, // 0-indexed
-    item.actionItemTitle || '',
-    item.actionItemDescription || '',
-    item.priority || '',
-    '', // GitHub Issue ID - populated after creation
-    '', // GitHub Issue Number - populated after creation
-    recap.meetingTitle || '',
-    recap.accountId || '',
-    recap.accountName || '',
-    new Date()
-  ]);
-  
+
+  // Build rows by looking up the live column positions on the sheet — never
+  // assume the in-code `headers` order matches the physical sheet order. The
+  // sheet has had columns inserted/swapped historically (e.g. by
+  // backfillActionItemAccountIds) and writing positionally caused
+  // accountId/accountName to be transposed for months.
+  const liveHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const colCount = liveHeaders.length;
+  const colByName = {};
+  for (let h = 0; h < liveHeaders.length; h++) {
+    colByName[String(liveHeaders[h])] = h; // 0-based
+  }
+
+  // Helper: given a row-array of length colCount, set the cell for `name`.
+  function setCell(rowArr, name, value) {
+    const c = colByName[name];
+    if (c !== undefined && c < colCount) rowArr[c] = value;
+  }
+
+  const now = new Date();
+  const rows = actionItems.map((item, index) => {
+    const r = new Array(colCount).fill('');
+    setCell(r, 'Meeting Recap ID', meetingRecapId);
+    setCell(r, 'Action Item Index', index);
+    setCell(r, 'Title', item.actionItemTitle || '');
+    setCell(r, 'Description', item.actionItemDescription || '');
+    setCell(r, 'Priority', item.priority || '');
+    setCell(r, 'GitHub Issue ID', '');
+    setCell(r, 'GitHub Issue Number', '');
+    setCell(r, 'Meeting Title', (recap && recap.meetingTitle) || '');
+    setCell(r, 'Account ID', (recap && recap.accountId) || '');
+    setCell(r, 'Account Name', (recap && recap.accountName) || '');
+    setCell(r, 'Created Date', now);
+    // Note: 'Firestore Task ID' (if present) is intentionally left blank;
+    // TaskFromRecap.js fills it in after the doc is written.
+    return r;
+  });
+
   // Append rows
   const nextRow = sheet.getLastRow() + 1;
-  sheet.getRange(nextRow, 1, rows.length, headers.length).setValues(rows);
-  
+  sheet.getRange(nextRow, 1, rows.length, colCount).setValues(rows);
+
   // Format description column to wrap text
-  const descIndex = headers.indexOf('Description') + 1;
-  if (descIndex > 0) {
-    sheet.getRange(nextRow, descIndex, rows.length, 1).setWrap(true);
+  const descColZero = colByName['Description'];
+  if (descColZero !== undefined) {
+    sheet.getRange(nextRow, descColZero + 1, rows.length, 1).setWrap(true);
   }
-  
+
   Logger.log(`Wrote ${rows.length} action items to ${MEETING_ACTION_ITEMS_SHEET}`);
-  
+
   return { count: rows.length };
 }
 
@@ -1193,90 +1222,71 @@ function storeAttendeeDetailsOnRecap(meetingRecapId, payload) {
 }
 
 /**
- * Process a create_task webhook - creates a GitHub issue and returns the result.
- * Called from the webapp's TaskPanel via the Apps Script web app URL.
+ * Process a create_task webhook — creates a Firestore task (Phase 3 hard
+ * cutover). Previously this hit the GitHub Issues API; the legacy TaskPanel
+ * still POSTs here, so we keep the endpoint live but redirect the write to
+ * Firestore so both UIs converge on the same data source.
  */
 function processCreateTaskWebhook(payload) {
-  Logger.log('Processing create_task webhook...');
-  
+  Logger.log('Processing create_task webhook (Firestore cutover)...');
+
   const title = payload.title;
   const description = payload.description || '';
-  const priority = payload.priority || 'Medium';
+  const rawPriority = payload.priority || '';
   const accountName = payload.accountName || '';
   const accountId = payload.accountId || '';
-  
+
   if (!title) {
     throw new Error('Missing required field: title');
   }
-  
+
   try {
-    const config = validateGitHubConfig();
-    ensureAutoGeneratedLabel(config.githubToken);
-    const projectInfo = getProjectFieldInfo(config);
-    
-    if (!projectInfo) {
-      throw new Error('Could not retrieve GitHub project info');
-    }
-    
-    // Build issue body
-    let body = description;
-    if (accountName) {
-      body += '\n\n---\n';
-      body += `**Account:** ${accountName}\n`;
-      body += `**Priority:** ${priority}\n`;
-      body += `\n*Manually created from dashboard on ${new Date().toISOString().split('T')[0]}*`;
-    }
-    
-    // Build labels
-    const labels = ['manual-task'];
-    if (accountName) {
-      labels.push(ACCOUNT_LABEL_PREFIX + accountName);
-    }
-    
-    // Create the issue
-    const issueData = createGitHubIssue(
-      config.githubToken,
-      GITHUB_ISSUE_REPO_OWNER,
-      GITHUB_ISSUE_REPO_NAME,
-      title,
-      body,
-      labels
-    );
-    
-    if (!issueData) {
-      throw new Error('Failed to create GitHub issue');
-    }
-    
-    const issueNodeId = issueData.node_id;
-    const issueNumber = issueData.number;
-    const issueUrl = issueData.html_url;
-    
-    // Add to project
-    const projectItemId = addIssueToProject(config.githubToken, projectInfo.projectId, issueNodeId);
-    
-    // Set priority if available
-    if (projectItemId && priority && projectInfo.priorityFieldId && projectInfo.priorityOptions) {
-      const priorityOptionId = projectInfo.priorityOptions[priority];
-      if (priorityOptionId) {
-        setProjectItemField(
-          config.githubToken,
-          projectInfo.projectId,
-          projectItemId,
-          projectInfo.priorityFieldId,
-          priorityOptionId
-        );
-      }
-    }
-    
-    Logger.log(`✓ Created task issue #${issueNumber}: ${title}`);
-    
+    const nowIso = new Date().toISOString();
+    const taskId = Utilities.getUuid();
+    const priority = normalizeTaskPriority(rawPriority);
+
+    const task = {
+      title: String(title).trim().substring(0, 200),
+      description: description,
+      status: 'backlog',
+      priority: priority,
+      targetDate: null,
+      accountId: accountId || null,
+      accountName: accountName || null,
+      parentTaskId: null,
+      assigneeIds: [],
+      source: 'manual',
+      sourceRef: {
+        manuallyCreatedBy: payload.createdBy || 'webhook',
+      },
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      closedAt: null,
+      createdBy: payload.createdBy || 'webhook',
+    };
+
+    writeFirestoreDocument('tasks', taskId, task);
+
+    // Activity log entry
+    const activityId = Utilities.getUuid();
+    writeFirestoreDocument('tasks/' + taskId + '/activity', activityId, {
+      type: 'created',
+      actorId: payload.createdBy || 'webhook',
+      timestamp: nowIso,
+      detail: { note: 'Created via legacy create_task webhook' },
+    });
+
+    Logger.log('✓ Created Firestore task ' + taskId + ': ' + title);
+
     return {
       action: 'created',
-      issueNodeId: issueNodeId,
-      issueNumber: issueNumber,
-      issueUrl: issueUrl
+      taskId: taskId,
+      // Legacy callers expect issue identifiers; return placeholders so the
+      // old TaskPanel's success path still parses cleanly.
+      issueNodeId: taskId,
+      issueNumber: 0,
+      issueUrl: '',
     };
-    
   } catch (error) {
     Logger.log('ERROR in processCreateTaskWebhook: ' + error.message);
     throw error;
@@ -1343,192 +1353,6 @@ function processCloseTaskWebhook(payload) {
     Logger.log('ERROR in processCloseTaskWebhook: ' + error.message);
     throw error;
   }
-}
-
-/**
- * Backfill Account ID on existing Meeting Action Items rows that have a blank Account ID.
- * Joins through Meeting Recap ID -> Webhook Meeting Recaps -> Account ID.
- * Also inserts the Account ID column header if it doesn't exist yet.
- * Run this once after deploying the WebhookHandler fix.
- */
-function backfillActionItemAccountIds() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const actionSheet = spreadsheet.getSheetByName(MEETING_ACTION_ITEMS_SHEET);
-  
-  if (!actionSheet || actionSheet.getLastRow() < 2) {
-    Logger.log('No data in Meeting Action Items sheet');
-    return;
-  }
-  
-  // Ensure Account ID column exists
-  const headerRow = actionSheet.getRange(1, 1, 1, actionSheet.getLastColumn()).getValues()[0];
-  let accountIdColIdx = headerRow.indexOf('Account ID'); // 0-based
-  if (accountIdColIdx === -1) {
-    const accountNameColIdx = headerRow.indexOf('Account Name');
-    const insertAt = accountNameColIdx !== -1 ? accountNameColIdx + 1 : headerRow.length; // 0-based insert position
-    actionSheet.insertColumnBefore(insertAt + 1); // sheets are 1-indexed
-    actionSheet.getRange(1, insertAt + 1).setValue('Account ID');
-    actionSheet.getRange(1, insertAt + 1)
-      .setFontWeight('bold')
-      .setBackground('#34a853')
-      .setFontColor('#ffffff');
-    accountIdColIdx = insertAt;
-    Logger.log(`Inserted Account ID column at position ${insertAt + 1}`);
-  }
-  
-  // Build recap ID -> Account ID map from Webhook Meeting Recaps
-  const recapsSheet = spreadsheet.getSheetByName(WEBHOOK_MEETING_RECAPS_SHEET);
-  const recapIdToAccount = new Map(); // recapId -> { accountId, accountName }
-  if (recapsSheet && recapsSheet.getLastRow() > 1) {
-    const recapsData = recapsSheet.getDataRange().getValues();
-    const rh = recapsData[0];
-    const rRecapIdx    = rh.indexOf('Meeting Recap ID');
-    const rAccountIdx  = rh.indexOf('Account ID');
-    const rNameIdx     = rh.indexOf('Account Name');
-    for (let i = 1; i < recapsData.length; i++) {
-      const rid = recapsData[i][rRecapIdx];
-      const aid = recapsData[i][rAccountIdx];
-      const aname = recapsData[i][rNameIdx];
-      if (rid && aid) recapIdToAccount.set(rid, { accountId: aid, accountName: aname || '' });
-    }
-  }
-  
-  // Re-read action items after potential column insert
-  const data = actionSheet.getDataRange().getValues();
-  const headers = data[0];
-  const recapIdIdx    = headers.indexOf('Meeting Recap ID');
-  const accountIdIdx  = headers.indexOf('Account ID');
-  
-  let fixed = 0, skipped = 0, unresolved = 0;
-  
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    if (!row[recapIdIdx]) continue;
-    if (row[accountIdIdx]) { skipped++; continue; }
-    
-    const account = recapIdToAccount.get(row[recapIdIdx]);
-    if (!account) { unresolved++; continue; }
-    
-    actionSheet.getRange(i + 1, accountIdIdx + 1).setValue(account.accountId);
-    fixed++;
-  }
-  
-  Logger.log(`Action items backfill: ${fixed} fixed, ${skipped} already had Account ID, ${unresolved} unresolved`);
-  SpreadsheetApp.getUi().alert(
-    'Backfill Complete',
-    `Action Items — Fixed: ${fixed}\nAlready had Account ID: ${skipped}\nCould not resolve: ${unresolved}`,
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
-}
-
-/**
- * Backfill Account ID / Account Name / Opportunity ID / Opportunity Name
- * on any existing Webhook Meeting Recaps rows where Account ID is blank
- * but External Attendees are present.
- * 
- * Run this manually from the Apps Script editor after fixing the domain mapping bug.
- */
-function backfillMeetingRecapAccountIds() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = spreadsheet.getSheetByName(WEBHOOK_MEETING_RECAPS_SHEET);
-  
-  if (!sheet || sheet.getLastRow() < 2) {
-    Logger.log('No data in Webhook Meeting Recaps sheet');
-    return;
-  }
-  
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  
-  const recapIdIdx      = headers.indexOf('Meeting Recap ID');
-  const accountIdIdx    = headers.indexOf('Account ID');
-  const accountNameIdx  = headers.indexOf('Account Name');
-  const oppIdIdx        = headers.indexOf('Opportunity ID');
-  const oppNameIdx      = headers.indexOf('Opportunity Name');
-  const mappedDomainIdx = headers.indexOf('Mapped Domain');
-  const externalIdx     = headers.indexOf('External Attendees');
-  const invitedIdx      = headers.indexOf('Invited Attendees');
-  const actualIdx       = headers.indexOf('Actual Attendees');
-  
-  if (accountIdIdx === -1 || externalIdx === -1) {
-    Logger.log('Required columns not found');
-    return;
-  }
-  
-  // Build maps once for efficiency
-  const domainToAccountMap = buildDomainToAccountMap();
-  const accountMap = buildAccountMap();
-  
-  let fixed = 0;
-  let skipped = 0;
-  let unresolved = 0;
-  
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const recapId = row[recapIdIdx];
-    
-    // Skip empty rows and rows that already have an Account ID
-    if (!recapId) continue;
-    if (row[accountIdIdx]) {
-      skipped++;
-      continue;
-    }
-    
-    // Collect all external email addresses from External, Invited, and Actual columns
-    const emailSources = [
-      externalIdx !== -1 ? String(row[externalIdx] || '') : '',
-      invitedIdx  !== -1 ? String(row[invitedIdx]  || '') : '',
-      actualIdx   !== -1 ? String(row[actualIdx]   || '') : ''
-    ];
-    
-    const allEmails = emailSources
-      .join(', ')
-      .split(/[,;\s]+/)
-      .map(e => e.trim().toLowerCase())
-      .filter(e => e.includes('@') && !e.includes('observepoint.com'));
-    
-    if (allEmails.length === 0) {
-      Logger.log(`Row ${i + 1} (${recapId}): no external emails found, cannot resolve`);
-      unresolved++;
-      continue;
-    }
-    
-    // Try each external email until we find a match
-    let accountInfo = null;
-    let mappedDomain = '';
-    for (const email of allEmails) {
-      accountInfo = findAccountByEmailCached(email, domainToAccountMap, accountMap);
-      if (accountInfo) {
-        mappedDomain = getEmailDomainForAccount(email);
-        break;
-      }
-    }
-    
-    if (!accountInfo) {
-      Logger.log(`Row ${i + 1} (${recapId}): no account match for emails: ${allEmails.join(', ')}`);
-      unresolved++;
-      continue;
-    }
-    
-    // Write the resolved account info back to the sheet
-    const rowNum = i + 1;
-    sheet.getRange(rowNum, accountIdIdx + 1).setValue(accountInfo.accountId || '');
-    sheet.getRange(rowNum, accountNameIdx + 1).setValue(accountInfo.accountName || '');
-    if (oppIdIdx !== -1)    sheet.getRange(rowNum, oppIdIdx + 1).setValue(accountInfo.opportunityId || '');
-    if (oppNameIdx !== -1)  sheet.getRange(rowNum, oppNameIdx + 1).setValue(accountInfo.opportunityName || '');
-    if (mappedDomainIdx !== -1) sheet.getRange(rowNum, mappedDomainIdx + 1).setValue(mappedDomain);
-    
-    Logger.log(`✓ Row ${i + 1} (${recapId}): resolved to ${accountInfo.accountName} (${accountInfo.accountId})`);
-    fixed++;
-  }
-  
-  Logger.log(`Backfill complete: ${fixed} fixed, ${skipped} already had Account ID, ${unresolved} unresolved`);
-  
-  SpreadsheetApp.getUi().alert(
-    'Backfill Complete',
-    `Fixed: ${fixed}\nAlready had Account ID: ${skipped}\nCould not resolve: ${unresolved}`,
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
 }
 
 /**
@@ -1726,128 +1550,3 @@ function testMeetingRecapWebhook() {
   }
 }
 
-/**
- * Manual function to reprocess action items and create missing GitHub issues
- */
-function createMissingGitHubIssuesFromActionItems() {
-  const ui = SpreadsheetApp.getUi();
-  
-  const response = ui.alert(
-    'Create Missing GitHub Issues',
-    'This will scan all action items and create GitHub issues for any that are missing.\n\n' +
-    'Continue?',
-    ui.ButtonSet.YES_NO
-  );
-  
-  if (response !== ui.Button.YES) {
-    return;
-  }
-  
-  try {
-    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-    const actionItemsSheet = spreadsheet.getSheetByName(MEETING_ACTION_ITEMS_SHEET);
-    const recapsSheet = spreadsheet.getSheetByName(WEBHOOK_MEETING_RECAPS_SHEET);
-    
-    if (!actionItemsSheet || actionItemsSheet.getLastRow() < 2) {
-      ui.alert('No Data', 'No action items found.', ui.ButtonSet.OK);
-      return;
-    }
-    
-    // Build a map of meeting recap IDs to recap data
-    const recapMap = new Map();
-    if (recapsSheet && recapsSheet.getLastRow() > 1) {
-      const recapData = recapsSheet.getDataRange().getValues();
-      const recapHeaders = recapData[0];
-      
-      for (let i = 1; i < recapData.length; i++) {
-        const recap = {};
-        for (let j = 0; j < recapHeaders.length; j++) {
-          const key = recapHeaders[j].replace(/\s+/g, '');
-          recap[key] = recapData[i][j];
-        }
-        recap.meetingTitle = recapData[i][recapHeaders.indexOf('Meeting Title')];
-        recap.meetingDate = recapData[i][recapHeaders.indexOf('Meeting Date')];
-        recap.accountName = recapData[i][recapHeaders.indexOf('Account Name')];
-        recap.externalAttendees = recapData[i][recapHeaders.indexOf('External Attendees')];
-        recap.meetingLink = recapData[i][recapHeaders.indexOf('Meeting Link')];
-        recap.summary = recapData[i][recapHeaders.indexOf('Summary')];
-        
-        recapMap.set(recapData[i][recapHeaders.indexOf('Meeting Recap ID')], recap);
-      }
-    }
-    
-    // Get action items
-    const actionData = actionItemsSheet.getDataRange().getValues();
-    const actionHeaders = actionData[0];
-    
-    const config = validateGitHubConfig();
-    ensureAutoGeneratedLabel(config.githubToken);
-    const projectInfo = getProjectFieldInfo(config);
-    
-    const idIndex = actionHeaders.indexOf('Meeting Recap ID');
-    const indexCol = actionHeaders.indexOf('Action Item Index');
-    const titleIndex = actionHeaders.indexOf('Title');
-    const descIndex = actionHeaders.indexOf('Description');
-    const priorityIndex = actionHeaders.indexOf('Priority');
-    const githubIdIndex = actionHeaders.indexOf('GitHub Issue ID');
-    const githubNumIndex = actionHeaders.indexOf('GitHub Issue Number');
-    
-    let created = 0;
-    let skipped = 0;
-    let errors = 0;
-    
-    for (let i = 1; i < actionData.length; i++) {
-      const row = actionData[i];
-      
-      // Skip if already has a GitHub Issue ID
-      if (row[githubIdIndex] && row[githubIdIndex].toString().trim()) {
-        skipped++;
-        continue;
-      }
-      
-      const meetingRecapId = row[idIndex];
-      const recap = recapMap.get(meetingRecapId) || {
-        meetingTitle: row[actionHeaders.indexOf('Meeting Title')],
-        accountName: row[actionHeaders.indexOf('Account Name')]
-      };
-      
-      const actionItem = {
-        actionItemTitle: row[titleIndex],
-        actionItemDescription: row[descIndex],
-        priority: row[priorityIndex]
-      };
-      
-      try {
-        const issueResult = createIssueFromActionItemWebhook(actionItem, recap, config, projectInfo);
-        
-        if (issueResult.created) {
-          created++;
-          
-          const rowNum = i + 1;
-          actionItemsSheet.getRange(rowNum, githubIdIndex + 1).setValue(issueResult.issueNodeId);
-          actionItemsSheet.getRange(rowNum, githubNumIndex + 1).setValue(issueResult.issueNumber);
-          
-          Logger.log(`  ✓ Created issue #${issueResult.issueNumber}: ${actionItem.actionItemTitle}`);
-        } else {
-          skipped++;
-        }
-      } catch (error) {
-        errors++;
-        Logger.log(`  ❌ Error: ${error.message}`);
-      }
-      
-      Utilities.sleep(200);
-    }
-    
-    ui.alert(
-      'Complete',
-      `Created: ${created}\nSkipped: ${skipped}\nErrors: ${errors}`,
-      ui.ButtonSet.OK
-    );
-    
-  } catch (error) {
-    Logger.log('ERROR: ' + error.message);
-    Logger.log(error.stack);
-    ui.alert('Error', error.message, ui.ButtonSet.OK);
-  }
-}

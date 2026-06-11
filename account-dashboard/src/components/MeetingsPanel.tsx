@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import type { Meeting, MeetingRecap, Task } from '../types';
+import type { Meeting, MeetingRecap } from '../types';
 import {
   ChevronDown,
   ChevronUp,
@@ -7,20 +7,23 @@ import {
   CalendarCheck,
   ExternalLink,
   Users,
-  GitBranch,
-  CircleDot,
-  CircleCheck,
+  ListTodo,
   FileText,
   UserCheck,
   UserX,
+  SquareArrowUpRight,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { useTasks } from '../hooks/useTasks';
 
 interface MeetingsPanelProps {
   meetings: Meeting[];
   recaps: MeetingRecap[];
-  tasks: Task[];
   initialView?: 'past' | 'upcoming';
+  /** When provided the panel fetches Firestore tasks for the account and
+   *  renders action items as clickable links that open TaskDetail. */
+  accountId?: string;
+  onTaskClick?: (taskId: string | null) => void;
 }
 
 interface PastMeetingEntry {
@@ -31,7 +34,31 @@ interface PastMeetingEntry {
   date: string;
 }
 
-export function MeetingsPanel({ meetings, recaps, tasks, initialView }: MeetingsPanelProps) {
+export function MeetingsPanel({
+  meetings,
+  recaps,
+  initialView,
+  accountId,
+  onTaskClick,
+}: MeetingsPanelProps) {
+  // Fetch tasks for this account so we can match action item titles to taskIds.
+  // When accountId is not provided (e.g. upcoming-only panel), we still call
+  // useTasks but with a parentTaskId sentinel that will never match anything,
+  // so the subscription is cheap and accountTasks stays empty.
+  const { tasks: accountTasks } = useTasks(
+    accountId && onTaskClick
+      ? { accountId }
+      : { parentTaskId: '__no_match__' }
+  );
+
+  // Build a normalized-title → taskId lookup so we can link action items.
+  const taskByTitle = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of accountTasks) {
+      m.set(normalizeTitle(t.title), t.taskId);
+    }
+    return m;
+  }, [accountTasks]);
   const [showSection, setShowSection] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAllPast, setShowAllPast] = useState(false);
@@ -47,43 +74,53 @@ export function MeetingsPanel({ meetings, recaps, tasks, initialView }: Meetings
 
   const pastEntries = useMemo(() => {
     const pastMeetings = meetings.filter((m) => m.isPast);
-    const recapMap = new Map<string, MeetingRecap>();
     const usedRecapIds = new Set<string>();
 
-    for (const recap of recaps) {
-      const key = normalizeTitle(recap.meetingTitle);
-      recapMap.set(key, recap);
-    }
+    // Recurring meetings (e.g. "ObservePoint | Caleres Sync") produce many
+    // recaps that all share the same normalized title. We must therefore pair
+    // each calendar event to the *closest-by-date* unused recap whose title
+    // matches — never just "first one with that title", which would alias all
+    // occurrences to a single recap and render duplicates with mis-stamped
+    // dates (see bug fix 2026-05-22).
+    const TWO_DAYS_MS = 86400000 * 2;
 
     const entries: PastMeetingEntry[] = [];
 
     for (const meeting of pastMeetings) {
       const normalizedTitle = normalizeTitle(meeting.title);
-      let matchedRecap: MeetingRecap | null = null;
+      const meetingTime = meeting.startTime
+        ? new Date(meeting.startTime).getTime()
+        : NaN;
 
-      if (recapMap.has(normalizedTitle)) {
-        matchedRecap = recapMap.get(normalizedTitle)!;
-        usedRecapIds.add(matchedRecap.recapId);
-      } else {
-        for (const recap of recaps) {
-          if (usedRecapIds.has(recap.recapId)) continue;
-          const recapNorm = normalizeTitle(recap.meetingTitle);
-          if (
-            recapNorm.includes(normalizedTitle) ||
-            normalizedTitle.includes(recapNorm)
-          ) {
-            if (meeting.startTime && recap.meetingDate) {
-              const meetDate = new Date(meeting.startTime).getTime();
-              const recapDate = new Date(recap.meetingDate).getTime();
-              if (Math.abs(meetDate - recapDate) < 86400000 * 2) {
-                matchedRecap = recap;
-                usedRecapIds.add(recap.recapId);
-                break;
-              }
-            }
-          }
+      let matchedRecap: MeetingRecap | null = null;
+      let bestDelta = Infinity;
+
+      for (const recap of recaps) {
+        if (usedRecapIds.has(recap.recapId)) continue;
+        const recapNorm = normalizeTitle(recap.meetingTitle);
+        const titleMatches =
+          recapNorm === normalizedTitle ||
+          recapNorm.includes(normalizedTitle) ||
+          normalizedTitle.includes(recapNorm);
+        if (!titleMatches) continue;
+
+        // If either side is missing a usable date, fall back to a one-shot
+        // title match (only when no date-based candidate has been found).
+        if (!Number.isFinite(meetingTime) || !recap.meetingDate) {
+          if (!matchedRecap) matchedRecap = recap;
+          continue;
+        }
+
+        const delta = Math.abs(
+          new Date(recap.meetingDate).getTime() - meetingTime
+        );
+        if (delta <= TWO_DAYS_MS && delta < bestDelta) {
+          bestDelta = delta;
+          matchedRecap = recap;
         }
       }
+
+      if (matchedRecap) usedRecapIds.add(matchedRecap.recapId);
 
       entries.push({
         key: `meeting-${meeting.eventId}-${entries.length}`,
@@ -109,14 +146,6 @@ export function MeetingsPanel({ meetings, recaps, tasks, initialView }: Meetings
     entries.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     return entries;
   }, [meetings, recaps]);
-
-  const taskByNumber = useMemo(() => {
-    const map = new Map<number, Task>();
-    for (const task of tasks) {
-      if (task.number) map.set(task.number, task);
-    }
-    return map;
-  }, [tasks]);
 
   // Auto-expand the first past entry when initialView is 'past'
   if (initialView === 'past' && !autoExpanded && pastEntries.length > 0 && expandedId === null) {
@@ -329,51 +358,50 @@ export function MeetingsPanel({ meetings, recaps, tasks, initialView }: Meetings
                     {entry.recap?.actionItems && entry.recap.actionItems.length > 0 && (
                       <div>
                         <h4 className="text-xs font-semibold text-dark-400 mb-1.5 flex items-center gap-1">
-                          <GitBranch className="w-3 h-3" /> GitHub Issues from Action Items
+                          <ListTodo className="w-3 h-3" /> Action Items
                         </h4>
                         <div className="space-y-1">
                           {entry.recap.actionItems.map((item, idx) => {
-                            const linkedTask = item.githubIssueNumber ? taskByNumber.get(item.githubIssueNumber) : null;
+                            const matchedTaskId = onTaskClick
+                              ? (taskByTitle.get(normalizeTitle(item.title)) ?? null)
+                              : null;
                             return (
                               <div key={`${entry.key}-ai-${idx}`} className="flex items-start gap-2 text-xs">
-                                {linkedTask ? (
-                                  linkedTask.state === 'OPEN' ? (
-                                    <CircleDot className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
-                                  ) : (
-                                    <CircleCheck className="w-3.5 h-3.5 text-dark-500 mt-0.5 shrink-0" />
-                                  )
-                                ) : (
-                                  <span className="text-dark-500 shrink-0 mt-0.5">•</span>
-                                )}
+                                <span className="text-dark-500 shrink-0 mt-0.5">•</span>
                                 <div className="min-w-0 flex-1">
-                                  {linkedTask ? (
-                                    <a href={linkedTask.url} target="_blank" rel="noopener noreferrer" className="text-dark-200 hover:text-accent transition-colors">
-                                      <span className="font-medium">{linkedTask.title}</span>
-                                      <span className="text-dark-500 ml-1">#{linkedTask.number}</span>
-                                    </a>
+                                  {matchedTaskId ? (
+                                    <button
+                                      onClick={() => onTaskClick!(matchedTaskId)}
+                                      className="text-accent hover:text-accent-hover font-medium hover:underline inline-flex items-center gap-1 text-left"
+                                      title="Open task"
+                                    >
+                                      {item.title}
+                                      <SquareArrowUpRight className="w-3 h-3 shrink-0" />
+                                    </button>
                                   ) : (
                                     <span className="text-dark-300 font-medium">{item.title}</span>
                                   )}
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    {linkedTask?.status && (
-                                      <span className="text-[10px] px-1 py-0.5 rounded bg-dark-700 text-dark-300">{linkedTask.status}</span>
-                                    )}
-                                    {linkedTask?.priority && (
-                                      <span className={`text-[10px] px-1 py-0.5 rounded ${linkedTask.priority === 'Critical' || linkedTask.priority === 'High' ? 'bg-red-500/10 text-red-400' : linkedTask.priority === 'Medium' ? 'bg-amber-500/10 text-amber-400' : 'bg-dark-700 text-dark-400'}`}>
-                                        {linkedTask.priority}
-                                      </span>
-                                    )}
-                                    {!linkedTask && item.priority && (
-                                      <span className={`text-[10px] px-1 py-0.5 rounded ${item.priority === 'High' ? 'bg-red-500/10 text-red-400' : 'bg-dark-700 text-dark-400'}`}>
-                                        {item.priority}
-                                      </span>
-                                    )}
-                                  </div>
+                                  {item.priority && (
+                                    <span
+                                      className={`ml-2 text-[10px] px-1 py-0.5 rounded ${
+                                        item.priority === 'High'
+                                          ? 'bg-red-500/10 text-red-400'
+                                          : 'bg-dark-700 text-dark-400'
+                                      }`}
+                                    >
+                                      {item.priority}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             );
                           })}
                         </div>
+                        {onTaskClick && (
+                          <p className="mt-2 text-[10px] text-dark-500">
+                            Live task status is available in the Tasks panel above.
+                          </p>
+                        )}
                       </div>
                     )}
 

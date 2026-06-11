@@ -4,9 +4,14 @@
  * Combines data from multiple sheets into a single comprehensive view:
  * - Accounts Card Report (base account data)
  * - Renewal Opportunities (renewal details)
- * - GitHub Tasks (aggregated by account)
  * - Email Communications (aggregated by account)
  * - Calendar Events (aggregated by account)
+ *
+ * NOTE (Phase 5 cutover): the legacy `GitHub Tasks` join is dormant. Tasks now
+ * live in the Firestore `tasks/{id}` collection, queried directly by the
+ * dashboard. The `GitHub Tasks (Total/Open/Closed)` columns and the
+ * `tasks: []` array on account docs are left in place at 0/empty for one or
+ * two sync cycles for rollback safety; Phase 6 removes them entirely.
  */
 
 const ACCOUNT_DATA_RAW_SHEET = 'Account Data Raw';
@@ -72,10 +77,12 @@ function loadSourceData() {
   const renewalData = renewalSheet.getDataRange().getValues();
   const renewalHeaders = renewalData[0];
   
-  // Load GitHub Tasks
-  const githubSheet = spreadsheet.getSheetByName('GitHub Tasks');
-  const githubData = githubSheet ? githubSheet.getDataRange().getValues() : [[]];
-  const githubHeaders = githubData.length > 0 ? githubData[0] : [];
+  // Load GitHub Tasks — DORMANT as of Phase 5 cutover. Force an empty load so
+  // every downstream map (`buildGitHubByAccountMap`, summaries, scoring)
+  // degrades to empty without touching the rest of this pipeline. The sheet
+  // itself is preserved for rollback until Phase 6.
+  const githubData = [[]];
+  const githubHeaders = [];
   
   // Load Email Communications
   const emailSheet = spreadsheet.getSheetByName('Email Communications');
@@ -879,7 +886,9 @@ function computeEngagementMetrics(tasks, emails, meetings, meetingRecaps, action
   //   Email activity (20pts): emails in last 90d — 10+=20, 5+=12, 1+=6, 0=0
   //   Meeting activity (20pts): meetings in last 30d — 3+=20, 2=15, 1=10, 0=0
   //   Future meetings (10pts): has upcoming meeting — yes=10, no=0
-  //   GitHub tasks open (10pts): open tasks — 5+=10, 3+=7, 1+=4, 0=0
+  // Phase 5 cutover: the legacy +10pt GitHub-open-tasks component was removed.
+  // A Firestore-tasks-native replacement will be added when this script moves
+  // to a Cloud Function. Engagement score now caps at 90.
   let score = 0;
 
   // Recency
@@ -905,10 +914,7 @@ function computeEngagementMetrics(tasks, emails, meetings, meetingRecaps, action
   // Future meetings
   if (meetingsFuture > 0) score += 10;
 
-  // Open GitHub tasks
-  if (tasksOpen >= 5) score += 10;
-  else if (tasksOpen >= 3) score += 7;
-  else if (tasksOpen >= 1) score += 4;
+  // (Phase 5) GitHub-tasks-open component removed.
 
   score = Math.min(100, score);
 

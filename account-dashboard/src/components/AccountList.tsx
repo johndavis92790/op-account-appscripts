@@ -36,25 +36,38 @@ export function AccountList() {
   const [seFilter, setSeFilter] = useState<string>('');
   const [fqComboFilter, setFqComboFilter] = useState<string>('');
   const [meetingFilter, setMeetingFilter] = useState<MeetingFilter>('');
+  const [showInactive, setShowInactive] = useState(false);
+
+  // Active-status filtered set drives counts and dropdown options.
+  // showInactive=false (default) → only active accounts. true → all.
+  const visibleAccounts = useMemo(
+    () => (showInactive ? accounts : accounts.filter((a) => a.isActive !== false)),
+    [accounts, showInactive]
+  );
+
+  const inactiveCount = useMemo(
+    () => accounts.filter((a) => a.isActive === false).length,
+    [accounts]
+  );
 
   const aeOptions = useMemo(() => {
-    const aes = new Set(accounts.map((a) => a.ae).filter(Boolean));
+    const aes = new Set(visibleAccounts.map((a) => a.ae).filter(Boolean));
     return Array.from(aes).sort();
-  }, [accounts]);
+  }, [visibleAccounts]);
 
   const seOptions = useMemo(() => {
-    const ses = new Set(accounts.map((a) => a.salesEngineer).filter(Boolean));
+    const ses = new Set(visibleAccounts.map((a) => a.salesEngineer).filter(Boolean));
     return Array.from(ses).sort();
-  }, [accounts]);
+  }, [visibleAccounts]);
 
   const fqComboOptions = useMemo(() => {
     const combos = new Set(
-      accounts
+      visibleAccounts
         .filter((a) => a.fiscalYear && a.fiscalQuarter)
         .map((a) => `${a.fiscalYear}-Q${a.fiscalQuarter}`)
     );
     return Array.from(combos).sort();
-  }, [accounts]);
+  }, [visibleAccounts]);
 
   const handleSortClick = (key: SortKey) => {
     if (sortBy === key) {
@@ -72,7 +85,7 @@ export function AccountList() {
   const hasAnyFilter = aeFilter || seFilter || fqComboFilter || meetingFilter || search;
 
   const filtered = useMemo(() => {
-    let list = accounts.filter((a) =>
+    let list = visibleAccounts.filter((a) =>
       a.accountName.toLowerCase().includes(search.toLowerCase())
     );
 
@@ -137,7 +150,7 @@ export function AccountList() {
     });
 
     return list;
-  }, [accounts, search, sortBy, sortAsc, aeFilter, seFilter, fqComboFilter, meetingFilter]);
+  }, [visibleAccounts, search, sortBy, sortAsc, aeFilter, seFilter, fqComboFilter, meetingFilter]);
 
   const navigate = useNavigate();
 
@@ -175,15 +188,35 @@ export function AccountList() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-dark-100 mb-1">Accounts</h1>
-          <p className="text-dark-400 text-sm">{accounts.length} active accounts</p>
+          <p className="text-dark-400 text-sm">
+            {visibleAccounts.length} {showInactive ? 'total' : 'active'} accounts
+            {!showInactive && inactiveCount > 0 && (
+              <span className="text-dark-500"> · {inactiveCount} inactive hidden</span>
+            )}
+          </p>
         </div>
-        <button
-          onClick={() => navigate('/domains')}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-dark-400 hover:text-dark-200 bg-dark-800 border border-dark-700 rounded-lg hover:border-dark-600 transition-colors"
-        >
-          <Globe className="w-3.5 h-3.5" />
-          Email Domains
-        </button>
+        <div className="flex items-center gap-2">
+          {inactiveCount > 0 && (
+            <button
+              onClick={() => setShowInactive((v) => !v)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
+                showInactive
+                  ? 'bg-accent/20 text-accent border-accent/30'
+                  : 'text-dark-400 hover:text-dark-200 bg-dark-800 border-dark-700 hover:border-dark-600'
+              }`}
+              title="Inactive accounts are no longer in the Renewal Opportunities sheet. Their data may be stale."
+            >
+              {showInactive ? 'Hide inactive' : `Show inactive (${inactiveCount})`}
+            </button>
+          )}
+          <button
+            onClick={() => navigate('/domains')}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-dark-400 hover:text-dark-200 bg-dark-800 border border-dark-700 rounded-lg hover:border-dark-600 transition-colors"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            Email Domains
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3 mb-6">
@@ -292,9 +325,23 @@ export function AccountList() {
             >
               {/* Row 1: Name + Score */}
               <div className="flex items-start justify-between mb-3">
-                <h3 className="font-semibold text-dark-100 group-hover:text-accent transition-colors truncate pr-2">
-                  {account.accountName}
-                </h3>
+                <div className="flex items-center gap-2 min-w-0">
+                  <h3 className="font-semibold text-dark-100 group-hover:text-accent transition-colors truncate">
+                    {account.accountName}
+                  </h3>
+                  {account.isActive === false && (
+                    <span
+                      className="shrink-0 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-400 bg-amber-500/10"
+                      title={
+                        account.deactivatedAt
+                          ? `Not in active renewals since ${new Date(account.deactivatedAt).toLocaleDateString()}. Data may be stale.`
+                          : 'Not in current Renewal Opportunities sheet. Data may be stale.'
+                      }
+                    >
+                      Inactive
+                    </span>
+                  )}
+                </div>
                 <span
                   className={`shrink-0 text-xs font-bold px-2 py-1 rounded-md border ${
                     scoreLevel === 'high'

@@ -71,6 +71,8 @@ export function useAccount(accountId: string | undefined) {
             meetingCadence: d.meetingCadence || '',
             emailDomains: d.emailDomains || '',
             lastSynced: d.lastSynced || '',
+            isActive: d.isActive !== false,
+            deactivatedAt: d.deactivatedAt || null,
           } as Account);
         } else {
           setAccount(null);

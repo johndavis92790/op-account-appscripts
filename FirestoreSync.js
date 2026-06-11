@@ -60,6 +60,7 @@ function syncToFirestore() {
     // Step 5: Build and push each account document to Firestore
     let synced = 0;
     let errors = 0;
+    const syncedIds = new Set();
     
     for (let i = 1; i < rawData.length; i++) {
       const row = rawData[i];
@@ -75,6 +76,7 @@ function syncToFirestore() {
       try {
         const doc = buildFirestoreDocument(row, rawHeaders, accountId, accountName, sources);
         writeFirestoreDocument('accounts', accountId, doc);
+        syncedIds.add(accountId);
         synced++;
       } catch (err) {
         Logger.log(`ERROR syncing ${accountName}: ${err.message}`);
@@ -83,6 +85,18 @@ function syncToFirestore() {
       
       // Rate limit to avoid quota issues
       if (i % 10 === 0) Utilities.sleep(100);
+    }
+    
+    // Step 5.5: Deactivate Firestore docs for accounts no longer in the active set
+    // (i.e. accounts that fell out of Renewal Opportunities — closed/lost/replaced).
+    // We don't delete to preserve notes, manual tasks, success criteria, etc.
+    try {
+      const deactivated = deactivateMissingAccounts(syncedIds);
+      if (deactivated > 0) {
+        Logger.log(`Deactivated ${deactivated} accounts no longer in active set`);
+      }
+    } catch (deactivateErr) {
+      Logger.log('Warning: deactivateMissingAccounts failed: ' + deactivateErr.message);
     }
     
     // Step 6: Sync current fiscal period to settings doc
@@ -265,6 +279,7 @@ function buildFirestoreDocument(row, headers, accountId, accountName, sources) {
     meetingCadence: meetingCadence,
     emailDomains: emailDomains,
     manualTasks: [], // preserved from Firestore, not overwritten
+    isActive: true,
     lastSynced: new Date().toISOString(),
   };
 }
@@ -856,6 +871,133 @@ function readFirestoreDocument(collection, docId, token) {
   
   if (response.getResponseCode() !== 200) return null;
   return JSON.parse(response.getContentText());
+}
+
+/**
+ * List all document IDs in a Firestore collection (paginated).
+ * Returns array of { id, isActive } for the accounts collection so we
+ * can decide which need deactivating without re-reading them.
+ */
+function listFirestoreCollectionIds(collection, fieldMask) {
+  const token = ScriptApp.getOAuthToken();
+  const baseUrl = FIRESTORE_BASE_URL + '/' + collection;
+  const maskParam = (fieldMask && fieldMask.length)
+    ? '&' + fieldMask.map(f => 'mask.fieldPaths=' + encodeURIComponent(f)).join('&')
+    : '';
+  
+  const results = [];
+  let pageToken = '';
+  let pages = 0;
+  
+  do {
+    const url = baseUrl + '?pageSize=300' + maskParam + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    const response = UrlFetchApp.fetch(url, {
+      method: 'get',
+      headers: { 'Authorization': 'Bearer ' + token },
+      muteHttpExceptions: true,
+    });
+    
+    if (response.getResponseCode() !== 200) {
+      throw new Error('listFirestoreCollectionIds failed: ' + response.getContentText().substring(0, 200));
+    }
+    
+    const body = JSON.parse(response.getContentText());
+    const docs = body.documents || [];
+    for (let i = 0; i < docs.length; i++) {
+      const d = docs[i];
+      const id = d.name.split('/').pop();
+      const fields = d.fields || {};
+      const isActiveField = fields.isActive;
+      // Firestore returns booleanValue: true/false; treat missing as "active" so first run flips them off correctly
+      const isActive = isActiveField ? (isActiveField.booleanValue === true) : true;
+      results.push({ id: id, isActive: isActive, fields: fields });
+    }
+    pageToken = body.nextPageToken || '';
+    pages++;
+    if (pages > 50) {
+      Logger.log('listFirestoreCollectionIds: page limit reached');
+      break;
+    }
+  } while (pageToken);
+  
+  return results;
+}
+
+/**
+ * Patch a Firestore document with only the specified fields (uses updateMask
+ * so other fields like notes/manualTasks are preserved).
+ */
+function patchFirestoreDocumentFields(collection, docId, partialData) {
+  const token = ScriptApp.getOAuthToken();
+  const fieldPaths = Object.keys(partialData);
+  if (fieldPaths.length === 0) return;
+  
+  const maskParam = fieldPaths.map(f => 'updateMask.fieldPaths=' + encodeURIComponent(f)).join('&');
+  const url = FIRESTORE_BASE_URL + '/' + collection + '/' + docId + '?' + maskParam;
+  
+  const firestoreFields = {};
+  for (const [k, v] of Object.entries(partialData)) {
+    firestoreFields[k] = convertToFirestoreValue(v);
+  }
+  
+  const response = UrlFetchApp.fetch(url, {
+    method: 'patch',
+    contentType: 'application/json',
+    headers: { 'Authorization': 'Bearer ' + token },
+    payload: JSON.stringify({ fields: firestoreFields }),
+    muteHttpExceptions: true,
+  });
+  
+  if (response.getResponseCode() !== 200) {
+    throw new Error('patchFirestoreDocumentFields failed (' + response.getResponseCode() + '): ' + response.getContentText().substring(0, 200));
+  }
+}
+
+/**
+ * Mark Firestore account docs as inactive if their accountId is NOT in syncedIds.
+ * Marks active=true on any doc that IS in syncedIds but is currently flagged inactive
+ * (e.g. an account that fell out and came back in).
+ * Does NOT delete docs — preserves notes, manual tasks, success criteria, contacts.
+ */
+function deactivateMissingAccounts(syncedIds) {
+  const allDocs = listFirestoreCollectionIds('accounts', ['isActive']);
+  let deactivated = 0;
+  let reactivated = 0;
+  const nowIso = new Date().toISOString();
+  
+  for (let i = 0; i < allDocs.length; i++) {
+    const doc = allDocs[i];
+    const inActiveSet = syncedIds.has(doc.id);
+    
+    if (!inActiveSet && doc.isActive !== false) {
+      // Falling out of active set — mark inactive
+      try {
+        patchFirestoreDocumentFields('accounts', doc.id, {
+          isActive: false,
+          deactivatedAt: nowIso,
+        });
+        deactivated++;
+      } catch (e) {
+        Logger.log('Failed to deactivate ' + doc.id + ': ' + e.message);
+      }
+    } else if (inActiveSet && doc.isActive === false) {
+      // Came back into active set — clear the deactivation flag
+      // (Note: main sync already wrote isActive:true for these, so this branch is rare,
+      // but keep it as a safety net.)
+      try {
+        patchFirestoreDocumentFields('accounts', doc.id, {
+          isActive: true,
+          deactivatedAt: null,
+        });
+        reactivated++;
+      } catch (e) {
+        Logger.log('Failed to reactivate ' + doc.id + ': ' + e.message);
+      }
+    }
+  }
+  
+  if (reactivated > 0) Logger.log('Reactivated ' + reactivated + ' accounts');
+  return deactivated;
 }
 
 /**

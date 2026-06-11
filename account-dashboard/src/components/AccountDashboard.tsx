@@ -1,14 +1,15 @@
-import { useMemo, useState, useRef } from 'react';
+import { useMemo, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAccount } from '../hooks/useAccount';
 import { useGlobalNotes } from '../hooks/useGlobalNotes';
 import { getScoreLevel, getStatusClass } from '../types';
-import type { Meeting, MeetingRecap, Task } from '../types';
+import type { Meeting } from '../types';
 import { NotesEditor } from './NotesEditor';
 import { GlobalNotesEditor } from './GlobalNotesEditor';
 import { SuccessCriteriaEditor } from './SuccessCriteriaEditor';
 import { ContactRoster } from './ContactRoster';
-import { TaskPanel } from './TaskPanel';
+import { TaskPanelV2 } from './tasks/TaskPanelV2';
+import { TaskDetail } from './tasks/TaskDetail';
 import { EmailPanel } from './EmailPanel';
 import { MeetingsPanel } from './MeetingsPanel';
 import {
@@ -42,6 +43,11 @@ export function AccountDashboard() {
   const navigate = useNavigate();
   const { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes, updateEmailDomains } = useAccount(accountId);
   const { globalNotes, updateGlobalNotes } = useGlobalNotes();
+
+  // Shared TaskDetail drawer — lifted so both TaskPanelV2 and MeetingsPanel
+  // can open the same drawer when an action item is clicked.
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const handleTaskClick = useCallback((id: string | null) => setOpenTaskId(id), []);
 
   const futureMeetings = useMemo(
     () =>
@@ -107,6 +113,22 @@ export function AccountDashboard() {
 
   return (
     <div className="p-4 sm:p-6 pb-24">
+      {/* Inactive banner — shown when the account has fallen out of the active Renewal Opportunities set */}
+      {account.isActive === false && (
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 px-4 py-3 text-sm flex items-start gap-2">
+          <Activity className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
+          <div>
+            <div className="font-semibold text-amber-300">Inactive account — data is stale</div>
+            <div className="text-xs text-amber-200/80 mt-0.5">
+              This account is no longer in the Renewal Opportunities sheet, so its
+              metrics (renewal date, meetings, emails, scores) have not been refreshed
+              {account.deactivatedAt && ' since ' + new Date(account.deactivatedAt).toLocaleDateString()}.
+              If they renewed, make sure the new renewal opportunity is in Salesforce / the Domo report.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <button
@@ -326,27 +348,30 @@ export function AccountDashboard() {
 
         {/* Right Column: Tasks, Past Meetings & Recaps (first expanded), Emails, Upcoming Meetings */}
         <div className="space-y-6">
-          <TaskPanel
-            tasks={account.tasks}
-            manualTasks={account.manualTasks}
+          <TaskPanelV2
             accountId={account.accountId}
             accountName={account.accountName}
+            externalOpenTaskId={openTaskId}
+            onExternalTaskClick={handleTaskClick}
           />
           <MeetingsPanel
             meetings={account.meetings}
             recaps={account.meetingRecaps}
-            tasks={account.tasks}
             initialView="past"
+            accountId={account.accountId}
+            onTaskClick={handleTaskClick}
           />
           <EmailPanel emails={account.emails} />
           <MeetingsPanel
             meetings={account.meetings}
             recaps={account.meetingRecaps}
-            tasks={account.tasks}
             initialView="upcoming"
           />
         </div>
       </div>
+
+      {/* Single shared TaskDetail drawer for the whole account page */}
+      <TaskDetail taskId={openTaskId} onClose={() => setOpenTaskId(null)} />
     </div>
   );
 }
