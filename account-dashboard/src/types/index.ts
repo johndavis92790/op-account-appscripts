@@ -73,7 +73,11 @@ export interface Account {
   meetingCadence: string;
 
   // Email domain mapping
-  emailDomains: string;
+  emailDomains: string;              // Final merged list (manual + auto - excluded)
+  emailDomainsAuto?: string;         // Auto-populated from contacts
+  emailDomainsManual?: string;     // Manually added (takes precedence)
+  emailDomainsExcluded?: string;     // Domains excluded from auto-population
+  emailDomainsLastAutoSync?: string; // Last auto-sync timestamp
 
   // Metadata
   lastSynced: string;
@@ -106,6 +110,10 @@ export interface AccountListItem {
   pricePerPage: number;
   salesEngineer: string;
   emailDomains: string;
+  emailDomainsAuto?: string;
+  emailDomainsManual?: string;
+  emailDomainsExcluded?: string;
+  emailDomainsLastAutoSync?: string;
   isActive: boolean;
   deactivatedAt: string | null;
 }

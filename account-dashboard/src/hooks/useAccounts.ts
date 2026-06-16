@@ -41,6 +41,10 @@ export function useAccounts() {
             pricePerPage: d.pricePerPage ?? 0,
             salesEngineer: d.salesEngineer || '',
             emailDomains: d.emailDomains || '',
+            emailDomainsAuto: d.emailDomainsAuto || '',
+            emailDomainsManual: d.emailDomainsManual || '',
+            emailDomainsExcluded: d.emailDomainsExcluded || '',
+            emailDomainsLastAutoSync: d.emailDomainsLastAutoSync || '',
             // Default to true so docs synced before this field existed still appear.
             // The next sync run will explicitly stamp isActive on all docs.
             isActive: d.isActive !== false,

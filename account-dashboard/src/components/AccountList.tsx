@@ -26,6 +26,7 @@ import { format, parseISO, isPast, differenceInDays, isToday, isTomorrow } from 
 
 type SortKey = 'renewal' | 'score' | 'contact' | 'name' | 'renewable' | 'loginScore' | 'auditUsage' | 'journeyUsage' | 'tasks' | 'pricePerPage' | 'lastMeeting';
 type MeetingFilter = '' | 'none' | 'today' | 'tomorrow';
+type ActiveFilter = 'active' | 'inactive' | 'all';
 
 export function AccountList() {
   const { accounts, loading, error } = useAccounts();
@@ -36,13 +37,24 @@ export function AccountList() {
   const [seFilter, setSeFilter] = useState<string>('');
   const [fqComboFilter, setFqComboFilter] = useState<string>('');
   const [meetingFilter, setMeetingFilter] = useState<MeetingFilter>('');
-  const [showInactive, setShowInactive] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>('active');
 
   // Active-status filtered set drives counts and dropdown options.
-  // showInactive=false (default) → only active accounts. true → all.
-  const visibleAccounts = useMemo(
-    () => (showInactive ? accounts : accounts.filter((a) => a.isActive !== false)),
-    [accounts, showInactive]
+  const visibleAccounts = useMemo(() => {
+    switch (activeFilter) {
+      case 'active':
+        return accounts.filter((a) => a.isActive !== false);
+      case 'inactive':
+        return accounts.filter((a) => a.isActive === false);
+      case 'all':
+      default:
+        return accounts;
+    }
+  }, [accounts, activeFilter]);
+
+  const activeCount = useMemo(
+    () => accounts.filter((a) => a.isActive !== false).length,
+    [accounts]
   );
 
   const inactiveCount = useMemo(
@@ -189,25 +201,51 @@ export function AccountList() {
         <div>
           <h1 className="text-2xl font-bold text-dark-100 mb-1">Accounts</h1>
           <p className="text-dark-400 text-sm">
-            {visibleAccounts.length} {showInactive ? 'total' : 'active'} accounts
-            {!showInactive && inactiveCount > 0 && (
-              <span className="text-dark-500"> · {inactiveCount} inactive hidden</span>
+            {visibleAccounts.length} {activeFilter === 'all' ? 'total' : activeFilter} accounts
+            {activeCount > 0 && inactiveCount > 0 && (
+              <span className="text-dark-500"> · {activeCount} active, {inactiveCount} inactive</span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {inactiveCount > 0 && (
-            <button
-              onClick={() => setShowInactive((v) => !v)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
-                showInactive
-                  ? 'bg-accent/20 text-accent border-accent/30'
-                  : 'text-dark-400 hover:text-dark-200 bg-dark-800 border-dark-700 hover:border-dark-600'
-              }`}
-              title="Inactive accounts are no longer in the Renewal Opportunities sheet. Their data may be stale."
-            >
-              {showInactive ? 'Hide inactive' : `Show inactive (${inactiveCount})`}
-            </button>
+          {/* Active/Inactive/All Segmented Control */}
+          {(activeCount > 0 || inactiveCount > 0) && (
+            <div className="flex items-center bg-dark-800 border border-dark-700 rounded-lg p-0.5">
+              {activeCount > 0 && (
+                <button
+                  onClick={() => setActiveFilter('active')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    activeFilter === 'active'
+                      ? 'bg-accent/20 text-accent'
+                      : 'text-dark-400 hover:text-dark-200'
+                  }`}
+                >
+                  Active{activeFilter === 'active' && ` (${activeCount})`}
+                </button>
+              )}
+              {inactiveCount > 0 && (
+                <button
+                  onClick={() => setActiveFilter('inactive')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    activeFilter === 'inactive'
+                      ? 'bg-amber-500/20 text-amber-400'
+                      : 'text-dark-400 hover:text-dark-200'
+                  }`}
+                >
+                  Inactive{activeFilter === 'inactive' && ` (${inactiveCount})`}
+                </button>
+              )}
+              <button
+                onClick={() => setActiveFilter('all')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  activeFilter === 'all'
+                    ? 'bg-dark-600 text-dark-100'
+                    : 'text-dark-400 hover:text-dark-200'
+                }`}
+              >
+                All{activeFilter === 'all' && ` (${accounts.length})`}
+              </button>
+            </div>
           )}
           <button
             onClick={() => navigate('/domains')}

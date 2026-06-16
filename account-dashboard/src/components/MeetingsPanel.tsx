@@ -36,11 +36,14 @@ interface PastMeetingEntry {
 
 export function MeetingsPanel({
   meetings,
-  recaps,
+  recaps: recapsProp,
   initialView,
   accountId,
   onTaskClick,
 }: MeetingsPanelProps) {
+  // Defensive: normalize recaps to always be an array (handles null, undefined, or bad data)
+  const recaps = Array.isArray(recapsProp) ? recapsProp : [];
+
   // Fetch tasks for this account so we can match action item titles to taskIds.
   // When accountId is not provided (e.g. upcoming-only panel), we still call
   // useTasks but with a parentTaskId sentinel that will never match anything,
@@ -441,7 +444,8 @@ export function MeetingsPanel({
   );
 }
 
-function normalizeTitle(title: string): string {
+function normalizeTitle(title: string | undefined | null): string {
+  if (!title) return '';
   return title
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')

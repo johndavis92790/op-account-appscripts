@@ -28,7 +28,29 @@ interface TaskCardProps {
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (taskId: string, shiftKey: boolean) => void;
+  /** Callback for quick status changes (shown when not selectable and showAccount is false i.e. on account page) */
+  onStatusChange?: (taskId: string, newStatus: string) => void;
+  /** Show status dropdown for quick changes (typically on account page) */
+  showStatusDropdown?: boolean;
 }
+
+const STATUS_STYLES: Record<string, string> = {
+  backlog: 'bg-dark-400/30 text-dark-200 border-dark-400/50',
+  generated: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+  open: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  in_progress: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  done: 'bg-green-500/20 text-green-400 border-green-500/30',
+  not_applicable: 'bg-dark-400/30 text-dark-300 border-dark-400/50',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  backlog: 'Backlog',
+  generated: 'Generated',
+  open: 'Open',
+  in_progress: 'In Progress',
+  done: 'Done',
+  not_applicable: 'N/A',
+};
 
 export function TaskCard({
   task,
@@ -42,10 +64,15 @@ export function TaskCard({
   selectable,
   selected,
   onToggleSelect,
+  onStatusChange,
+  showStatusDropdown = false,
 }: TaskCardProps) {
   const urgency = targetDateUrgency(task.targetDate);
   const priority = task.priority ? PRIORITY_DISPLAY[task.priority] : null;
   const source = SOURCE_DISPLAY[task.source];
+  const status = task.status;
+  const statusStyle = status ? STATUS_STYLES[status] || STATUS_STYLES.backlog : STATUS_STYLES.backlog;
+  const statusLabel = status ? STATUS_LABELS[status] || status : 'Unknown';
 
   return (
     <div
@@ -88,7 +115,7 @@ export function TaskCard({
           />
         )}
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-dark-100 group-hover:text-accent leading-snug line-clamp-2">
+          <div className="text-sm font-medium text-dark-100 group-hover:text-accent leading-snug line-clamp-3">
             {task.title}
           </div>
         </div>
@@ -99,6 +126,35 @@ export function TaskCard({
           >
             {priority.label}
           </span>
+        )}
+        {/* Status Badge */}
+        {status && (
+          <span
+            className={`shrink-0 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${statusStyle}`}
+            title={`Status: ${statusLabel}`}
+          >
+            {statusLabel}
+          </span>
+        )}
+        {/* Quick Status Change Dropdown (when on account page) */}
+        {showStatusDropdown && onStatusChange && !selectable && (
+          <select
+            value={status || 'backlog'}
+            onChange={(e) => {
+              e.stopPropagation();
+              onStatusChange(task.taskId, e.target.value);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="shrink-0 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border bg-dark-800 text-dark-100 border-dark-600 hover:border-accent focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
+            title="Click to change status"
+          >
+            <option value="backlog">Backlog</option>
+            <option value="generated">Generated</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="done">Done</option>
+            <option value="not_applicable">N/A</option>
+          </select>
         )}
       </div>
 

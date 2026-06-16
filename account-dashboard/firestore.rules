@@ -81,5 +81,52 @@ service cloud.firestore {
     match /taskLabels/{labelId} {
       allow read, write: if isAuthorized();
     }
+
+    // =========================================================================
+    // NEW: Collections for Firebase Functions Migration
+    // =========================================================================
+
+    // Email domain mappings - managed by Functions, read by webapp
+    match /emailDomainMappings/{accountId} {
+      allow read: if isAuthorized();
+      allow write: if false; // Only Firebase Functions can write (via service account)
+    }
+
+    // Import state tracking - managed by Functions
+    match /importState/{importType} {
+      allow read: if isAuthorized();
+      allow write: if false; // Functions only
+    }
+
+    // Webhook logs - for debugging
+    match /webhookLogs/{logId} {
+      allow read: if isAuthorized();
+      allow create: if true; // Webhooks can log
+      allow update, delete: if false;
+    }
+
+    // =========================================================================
+    // NEW: Account Subcollections (for Firestore-only architecture)
+    // =========================================================================
+
+    // Contacts subcollection
+    match /accounts/{accountId}/contacts/{email} {
+      allow read, write: if isAuthorized();
+    }
+
+    // Meeting recaps subcollection
+    match /accounts/{accountId}/meetingRecaps/{recapId} {
+      allow read, write: if isAuthorized();
+    }
+
+    // Emails subcollection
+    match /accounts/{accountId}/emails/{messageId} {
+      allow read, write: if isAuthorized();
+    }
+
+    // Calendar events subcollection
+    match /accounts/{accountId}/calendarEvents/{eventId} {
+      allow read, write: if isAuthorized();
+    }
   }
 }

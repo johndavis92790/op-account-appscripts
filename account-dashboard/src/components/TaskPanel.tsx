@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { createTask } from '../hooks/taskMutations';
+import { useAuth } from '../hooks/useAuth';
 import type { Task, ManualTask } from '../types';
 import {
   GitBranch,
@@ -38,23 +40,18 @@ export function TaskPanel({ tasks, manualTasks, accountId, accountName }: TaskPa
   const [showClosed, setShowClosed] = useState(false);
   const [closingTask, setClosingTask] = useState<number | null>(null);
 
-  const handleCloseTask = async (issueNumber: number) => {
-    if (!issueNumber) return;
-    setClosingTask(issueNumber);
+  const handleCloseTask = async (taskId: string) => {
+    if (!taskId) return;
+    setClosingTask(Number(taskId));
     try {
-      const webhookUrl = import.meta.env.VITE_APPS_SCRIPT_WEBHOOK_URL;
-      if (webhookUrl) {
-        const res = await fetch(`${webhookUrl}?type=close_task`, {
-          method: 'POST',
-          body: JSON.stringify({ issueNumber }),
-        });
-        if (res.ok) {
-          const result = await res.json();
-          if (result.success) {
-            window.location.reload();
-          }
-        }
-      }
+      // Close task directly in Firestore
+      await updateDoc(doc(db, 'tasks', taskId), {
+        status: 'done',
+        closedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      // Refresh to show updated state
+      window.location.reload();
     } catch (err) {
       console.error('Failed to close task:', err);
     } finally {
@@ -66,46 +63,18 @@ export function TaskPanel({ tasks, manualTasks, accountId, accountName }: TaskPa
     if (!form.title.trim()) return;
     setCreating(true);
     try {
-      // Call Apps Script webhook to create GitHub issue
-      const webhookUrl = import.meta.env.VITE_APPS_SCRIPT_WEBHOOK_URL;
-      let githubData = null;
+      const { user } = useAuth();
+      const currentUser = user?.email || '';
 
-      if (webhookUrl) {
-        try {
-          const res = await fetch(`${webhookUrl}?type=create_task`, {
-            method: 'POST',
-            body: JSON.stringify({
-              title: form.title,
-              description: form.description,
-              priority: form.priority,
-              accountName,
-              accountId,
-            }),
-          });
-          if (res.ok) {
-            const result = await res.json();
-            if (result.success) {
-              githubData = result;
-            }
-          }
-        } catch (webhookErr) {
-          console.warn('GitHub issue creation failed, saving task locally:', webhookErr);
-        }
-      }
-
-      await addDoc(collection(db, 'accounts', accountId, 'manualTasks'), {
+      // Create task directly in Firestore via taskMutations
+      await createTask({
         title: form.title,
         description: form.description,
-        priority: form.priority,
-        status: 'Open',
+        priority: form.priority === 'High' ? 'high' : form.priority === 'Medium' ? 'medium' : 'low',
+        status: 'backlog',
         accountId,
         accountName,
-        githubIssueId: githubData?.issueNodeId || null,
-        githubIssueNumber: githubData?.issueNumber || null,
-        githubIssueUrl: githubData?.issueUrl || null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      });
+      }, currentUser);
 
       setForm({ title: '', description: '', priority: 'Medium' });
       setShowCreate(false);
@@ -257,14 +226,14 @@ export function TaskPanel({ tasks, manualTasks, accountId, accountName }: TaskPa
                       View on GitHub <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
-                  {task.number && (
+                  {task.taskId && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleCloseTask(task.number!); }}
-                      disabled={closingTask === task.number}
+                      onClick={(e) => { e.stopPropagation(); handleCloseTask(task.taskId); }}
+                      disabled={closingTask === Number(task.taskId)}
                       className="text-xs text-dark-500 hover:text-red-400 flex items-center gap-1 transition-colors"
                       title="Close task"
                     >
-                      {closingTask === task.number ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                      {closingTask === Number(task.taskId) ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
                       Close
                     </button>
                   )}

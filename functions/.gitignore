@@ -1,0 +1,15 @@
+# Firebase Functions
+lib/
+firebase-debug.log
+.firebase/
+
+# Dependencies
+node_modules/
+
+# Secrets & Credentials
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+.env
+.env.local

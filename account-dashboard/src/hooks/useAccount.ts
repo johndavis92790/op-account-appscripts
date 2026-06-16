@@ -63,13 +63,17 @@ export function useAccount(accountId: string | undefined) {
             tasks: d.tasks || [],
             emails: d.emails || [],
             meetings: d.meetings || [],
-            meetingRecaps: d.meetingRecaps || [],
+            meetingRecaps: Array.isArray(d.meetingRecaps) ? d.meetingRecaps : [],
             notes: d.notes || { content: '', lastSaved: null },
             successCriteria: d.successCriteria || { content: '', lastSaved: null },
             contacts: d.contacts || [],
             manualTasks: d.manualTasks || [],
             meetingCadence: d.meetingCadence || '',
             emailDomains: d.emailDomains || '',
+            emailDomainsAuto: d.emailDomainsAuto || '',
+            emailDomainsManual: d.emailDomainsManual || '',
+            emailDomainsExcluded: d.emailDomainsExcluded || '',
+            emailDomainsLastAutoSync: d.emailDomainsLastAutoSync || '',
             lastSynced: d.lastSynced || '',
             isActive: d.isActive !== false,
             deactivatedAt: d.deactivatedAt || null,
@@ -121,15 +125,106 @@ export function useAccount(accountId: string | undefined) {
     });
   };
 
-  const updateEmailDomains = async (domains: string) => {
+  // Update manual domains - this takes precedence over auto-populated
+  const updateEmailDomains = async (manualDomains: string) => {
     if (!accountId) return;
+
+    // Parse the input
+    const newManualSet = new Set(
+      manualDomains.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
+
+    // Get current auto domains
+    const currentAuto = account?.emailDomainsAuto || '';
+    const autoSet = new Set(
+      currentAuto.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
+
+    // Remove manual domains from auto list (manual takes precedence)
+    for (const manual of newManualSet) {
+      autoSet.delete(manual);
+    }
+
+    // Build final merged list
+    const finalDomains = [...Array.from(newManualSet).sort(), ...Array.from(autoSet).sort()];
+
     const docRef = doc(db, 'accounts', accountId);
     await updateDoc(docRef, {
-      emailDomains: domains,
+      emailDomainsManual: Array.from(newManualSet).sort().join(', '),
+      emailDomains: finalDomains.join(', '),
       emailDomainsSource: 'webapp',
       emailDomainsLastSaved: new Date().toISOString(),
     });
   };
 
-  return { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes, updateEmailDomains };
+  // Exclude an auto-populated domain (adds to exclusion list, removes from auto)
+  const excludeEmailDomain = async (domainToExclude: string) => {
+    if (!accountId || !account) return;
+
+    const normalizedDomain = domainToExclude.trim().toLowerCase();
+    if (!normalizedDomain) return;
+
+    // Get current sets
+    const currentExcluded = account.emailDomainsExcluded || '';
+    const excludedSet = new Set(
+      currentExcluded.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
+
+    const currentAuto = account.emailDomainsAuto || '';
+    const autoSet = new Set(
+      currentAuto.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
+
+    const currentManual = account.emailDomainsManual || '';
+    const manualSet = new Set(
+      currentManual.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
+
+    // Add to exclusion list
+    excludedSet.add(normalizedDomain);
+
+    // Remove from auto list
+    autoSet.delete(normalizedDomain);
+
+    // Build final merged list (manual + remaining auto)
+    const finalDomains = [...Array.from(manualSet).sort(), ...Array.from(autoSet).sort()];
+
+    const docRef = doc(db, 'accounts', accountId);
+    await updateDoc(docRef, {
+      emailDomainsExcluded: Array.from(excludedSet).sort().join(', '),
+      emailDomainsAuto: Array.from(autoSet).sort().join(', '),
+      emailDomains: finalDomains.join(', '),
+      emailDomainsSource: 'webapp',
+      emailDomainsLastSaved: new Date().toISOString(),
+    });
+  };
+
+  // Restore an excluded domain back to auto-population consideration
+  const restoreEmailDomain = async (domainToRestore: string) => {
+    if (!accountId || !account) return;
+
+    const normalizedDomain = domainToRestore.trim().toLowerCase();
+    if (!normalizedDomain) return;
+
+    // Get current exclusion set
+    const currentExcluded = account.emailDomainsExcluded || '';
+    const excludedSet = new Set(
+      currentExcluded.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+    );
+
+    // Remove from exclusion list
+    excludedSet.delete(normalizedDomain);
+
+    // The domain will be re-added to auto on next daily sync if it exists in contacts
+    // We don't add it to auto here - let the daily sync handle that
+
+    const docRef = doc(db, 'accounts', accountId);
+    await updateDoc(docRef, {
+      emailDomainsExcluded: Array.from(excludedSet).sort().join(', '),
+      emailDomainsSource: 'webapp',
+      emailDomainsLastSaved: new Date().toISOString(),
+    });
+  };
+
+  return { account, loading, error, updateNotes, updateSuccessCriteria, updateContactNotes, updateEmailDomains, excludeEmailDomain, restoreEmailDomain };
 }

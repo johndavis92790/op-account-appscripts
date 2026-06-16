@@ -1,6 +1,3 @@
-# Clasp
-.clasp.json
-
 # macOS
 .DS_Store
 
@@ -9,6 +6,50 @@
 
 # Spreadsheets
 *.xlsx
+*.csv
 
 # Firebase
 .firebase/
+
+# Node.js
+node_modules/
+account-dashboard/node_modules/
+functions/node_modules/
+
+# Credentials & Secrets (NEVER commit these)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!firebase.json
+!firestore.indexes.json
+!firestore.rules.json
+!functions/package.json
+!functions/package-lock.json
+!functions/tsconfig.json
+!account-dashboard/package.json
+!account-dashboard/package-lock.json
+!account-dashboard/tsconfig.json
+!account-dashboard/firebase.json
+credentials*
+*secret*
+*token*
+service-account*
+client_secret*
+gmail-tokens*
+
+# Migration data (one-time exports)
+migration/exported-data/
+
+# Output files
+*.txt
+!README*.md
+!SETUP*.md
+!FIREBASE*.md
+!APPS_SCRIPT*.md
+!TASKS*.md
+
+# Environment files
+.env
+.env.local
+.env.*.local
