@@ -11,7 +11,7 @@
  */
 
 import * as functions from 'firebase-functions';
-import { db } from '../firestore';
+import { db, getContactsForAccount } from '../firestore';
 import { collections } from '../config';
 import type { Account } from '../types';
 
@@ -129,7 +129,8 @@ interface AccountProcessResult {
 }
 
 async function processAccount(account: Account): Promise<AccountProcessResult> {
-  const contacts = account.contacts || [];
+  // Fetch contacts from subcollection
+  const contacts = await getContactsForAccount(account.accountId);
   
   if (contacts.length === 0) {
     return {
