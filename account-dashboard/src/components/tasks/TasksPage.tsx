@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   LayoutGrid,
   List,
@@ -8,6 +8,8 @@ import {
   CheckSquare,
   ArrowDownUp,
   Tag,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
 import { useTasks } from '../../hooks/useTasks';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -62,6 +64,18 @@ export function TasksPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
 
+  // Move-toast: shown when tasks are moved to a status hidden by the current filter
+  const [moveToast, setMoveToast] = useState<{ count: number; status: TaskStatus } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showMoveToast = useCallback((count: number, status: TaskStatus) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setMoveToast({ count, status });
+    toastTimerRef.current = setTimeout(() => setMoveToast(null), 5000);
+  }, []);
+
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
+
   const { accounts } = useAccounts();
   const { user } = useAuth();
   const { labels } = useTaskLabels();
@@ -107,17 +121,46 @@ export function TasksPage() {
   // Drag-and-drop status change. The TaskBoard hands us the target column;
   // we resolve the previous task state from the in-memory list (avoids an
   // extra Firestore read).
+  // Returns true if `status` would be hidden by the current statusFilter.
+  const isStatusHidden = useCallback(
+    (status: TaskStatus) => {
+      if (statusFilter === 'all') return false;
+      if (statusFilter === 'open') return !TASK_OPEN_STATUSES.includes(status);
+      return statusFilter !== status;
+    },
+    [statusFilter]
+  );
+
   const handleMoveTask = useCallback(
     async (taskId: string, newStatus: TaskStatus) => {
       const prev = rawTasks.find((t) => t.taskId === taskId);
       if (!prev) return;
       try {
         await setTaskStatus(taskId, newStatus, prev, currentUser);
+        if (isStatusHidden(newStatus)) showMoveToast(1, newStatus);
       } catch (err) {
         console.error('Move task failed:', err);
       }
     },
-    [rawTasks, currentUser]
+    [rawTasks, currentUser, isStatusHidden, showMoveToast]
+  );
+
+  const handleMoveTasks = useCallback(
+    async (taskIds: string[], newStatus: TaskStatus) => {
+      await Promise.all(
+        taskIds.map(async (taskId) => {
+          const prev = rawTasks.find((t) => t.taskId === taskId);
+          if (!prev) return;
+          try {
+            await setTaskStatus(taskId, newStatus, prev, currentUser);
+          } catch (err) {
+            console.error('Move task failed:', err);
+          }
+        })
+      );
+      if (isStatusHidden(newStatus)) showMoveToast(taskIds.length, newStatus);
+    },
+    [rawTasks, currentUser, isStatusHidden, showMoveToast]
   );
 
   // Multi-select toggle: shift-click extends the range from the last
@@ -355,6 +398,27 @@ export function TasksPage() {
           </div>
         </div>
 
+        {/* Move toast — appears when tasks are filtered out after a drag */}
+        {moveToast && (
+          <div className="mx-4 mt-3 flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/30 rounded-lg text-xs text-green-300">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+            <span className="flex-1">
+              {moveToast.count === 1 ? '1 task' : `${moveToast.count} tasks`} moved to{' '}
+              <span className="font-semibold">{TASK_STATUS_LABELS[moveToast.status]}</span>
+              {' '}— hidden by current filter.
+            </span>
+            <button
+              onClick={() => { setStatusFilter('all'); setMoveToast(null); }}
+              className="underline hover:no-underline font-medium"
+            >
+              Show all
+            </button>
+            <button onClick={() => setMoveToast(null)} className="ml-1 text-green-500 hover:text-green-200">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Body */}
         <div className="flex-1 overflow-auto p-4">
           {error && (
@@ -371,6 +435,7 @@ export function TasksPage() {
                 showAccount={showAccountColumn}
                 onTaskClick={setOpenTaskId}
                 onMoveTask={selectMode ? undefined : handleMoveTask}
+                onMoveTasks={selectMode ? handleMoveTasks : undefined}
                 sortKey={sortKey}
                 sortAsc={sortAsc}
                 selectable={selectMode}

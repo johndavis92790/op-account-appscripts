@@ -64,7 +64,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-dark-900">
       <header className="sticky top-0 z-50 bg-dark-950/80 backdrop-blur-xl border-b border-dark-700/50">
-        <div className="max-w-[1600px] mx-auto px-4 h-14 flex items-center justify-between">
+        <div className="w-full px-4 h-14 flex items-center justify-between">
           <Link
             to="/"
             className="flex items-center gap-3 group"
@@ -93,7 +93,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto">
+      <main className="w-full">
         <Routes>
           <Route path="/" element={<AccountList />} />
           <Route path="/account/:accountId" element={<AccountDashboard />} />

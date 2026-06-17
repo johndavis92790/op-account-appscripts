@@ -11,6 +11,8 @@ interface TaskBoardProps {
   onTaskClick: (taskId: string) => void;
   /** Called when a card is dropped onto a new column. Parent persists the change. */
   onMoveTask?: (taskId: string, newStatus: TaskStatus) => void;
+  /** Called when multiple selected cards are dropped onto a new column. */
+  onMoveTasks?: (taskIds: string[], newStatus: TaskStatus) => void;
   showAccount?: boolean;
   /** Restrict which columns to show. Defaults to all five. */
   visibleStatuses?: TaskStatus[];
@@ -24,11 +26,13 @@ interface TaskBoardProps {
 }
 
 const DRAG_MIME = 'application/x-task-id';
+const DRAG_MIME_MULTI = 'application/x-task-ids';
 
 export function TaskBoard({
   tasks,
   onTaskClick,
   onMoveTask,
+  onMoveTasks,
   showAccount = true,
   visibleStatuses = STATUS_COLUMN_ORDER,
   sortKey = 'priority',
@@ -84,7 +88,7 @@ export function TaskBoard({
   }, [tasks, visibleStatuses, sortKey, sortAsc]);
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-4">
+    <div className="flex gap-3 overflow-x-auto pb-4 h-full">
       {visibleStatuses.map((status) => {
         const list = grouped.get(status) || [];
         const display = STATUS_DISPLAY[status];
@@ -93,9 +97,9 @@ export function TaskBoard({
           <div
             key={status}
             onDragOver={(e) => {
-              if (!onMoveTask) return;
+              if (!onMoveTask && !onMoveTasks) return;
               // Only accept drags carrying our task MIME (set by TaskCard).
-              if (e.dataTransfer.types.includes(DRAG_MIME)) {
+              if (e.dataTransfer.types.includes(DRAG_MIME) || e.dataTransfer.types.includes(DRAG_MIME_MULTI)) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
                 if (dragOverStatus !== status) setDragOverStatus(status);
@@ -108,13 +112,20 @@ export function TaskBoard({
               }
             }}
             onDrop={(e) => {
-              if (!onMoveTask) return;
               e.preventDefault();
-              const taskId = e.dataTransfer.getData(DRAG_MIME);
               setDragOverStatus(null);
-              if (taskId) onMoveTask(taskId, status);
+              const multiRaw = e.dataTransfer.getData(DRAG_MIME_MULTI);
+              if (multiRaw && onMoveTasks) {
+                try {
+                  const ids: string[] = JSON.parse(multiRaw);
+                  if (ids.length > 0) onMoveTasks(ids, status);
+                } catch { /* ignore malformed */ }
+                return;
+              }
+              const taskId = e.dataTransfer.getData(DRAG_MIME);
+              if (taskId && onMoveTask) onMoveTask(taskId, status);
             }}
-            className={`shrink-0 w-72 bg-dark-900/40 border rounded-xl flex flex-col max-h-[calc(100vh-220px)] transition-colors ${
+            className={`flex-1 min-w-64 max-w-sm bg-dark-900/40 border rounded-xl flex flex-col max-h-[calc(100vh-220px)] transition-colors ${
               isDragOver
                 ? 'border-accent/70 bg-accent/5'
                 : 'border-dark-700/40'
@@ -139,11 +150,17 @@ export function TaskBoard({
                     task={t}
                     showAccount={showAccount}
                     onClick={onTaskClick}
-                    draggable={!!onMoveTask && !selectable}
+                    draggable={!!onMoveTask || (selectable && !!onMoveTasks && !!selectedIds?.has(t.taskId))}
                     onDragStart={(e) => {
-                      e.dataTransfer.setData(DRAG_MIME, t.taskId);
+                      if (selectable && selectedIds && selectedIds.has(t.taskId) && onMoveTasks) {
+                        // Carry all selected IDs so a multi-drag moves them all.
+                        e.dataTransfer.setData(DRAG_MIME_MULTI, JSON.stringify([...selectedIds]));
+                      } else {
+                        e.dataTransfer.setData(DRAG_MIME, t.taskId);
+                      }
                       e.dataTransfer.effectAllowed = 'move';
                     }}
+                    hideStatus
                     labelsById={labelsById}
                     selectable={selectable}
                     selected={selectedIds?.has(t.taskId)}

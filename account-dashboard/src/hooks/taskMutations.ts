@@ -310,24 +310,19 @@ export async function updateTask(
 // -----------------------------------------------------------------------------
 
 /**
- * Permanently delete a task and its comments. Activity entries are removed too
- * (Firestore rules deny client deletes on activity, so we use a batch write
- * which still works because batched deletes go through the same rule path —
- * keep this in mind if rules tighten).
- *
- * For our scale (low-thousands of tasks, single-digit comments each) batched
- * delete is fine. Larger fan-out would warrant a Cloud Function.
+ * Permanently delete a task and its comments. Activity sub-collection entries
+ * are intentionally left intact — Firestore rules deny client-side deletes on
+ * activity (append-only audit log), so attempting to delete them would fail the
+ * entire batch. Orphaned activity documents are harmless.
  */
 export async function deleteTask(taskId: string): Promise<void> {
-  // Fetch sub-collection docs first
-  const [commentsSnap, activitySnap] = await Promise.all([
-    getDocs(collection(db, 'tasks', taskId, 'comments')),
-    getDocs(collection(db, 'tasks', taskId, 'activity')),
-  ]);
+  // Fetch comments sub-collection first.
+  // Note: activity docs are append-only (rules deny client deletes), so we
+  // intentionally skip them — orphaned activity entries are harmless.
+  const commentsSnap = await getDocs(collection(db, 'tasks', taskId, 'comments'));
 
   const batch = writeBatch(db);
   commentsSnap.forEach((d) => batch.delete(d.ref));
-  activitySnap.forEach((d) => batch.delete(d.ref));
   batch.delete(doc(db, 'tasks', taskId));
   await batch.commit();
 }

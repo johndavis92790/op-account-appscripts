@@ -32,6 +32,8 @@ interface TaskCardProps {
   onStatusChange?: (taskId: string, newStatus: string) => void;
   /** Show status dropdown for quick changes (typically on account page) */
   showStatusDropdown?: boolean;
+  /** Hide the status badge (use on kanban where the column header already shows status) */
+  hideStatus?: boolean;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -66,6 +68,7 @@ export function TaskCard({
   onToggleSelect,
   onStatusChange,
   showStatusDropdown = false,
+  hideStatus = false,
 }: TaskCardProps) {
   const urgency = targetDateUrgency(task.targetDate);
   const priority = task.priority ? PRIORITY_DISPLAY[task.priority] : null;
@@ -100,7 +103,8 @@ export function TaskCard({
           : 'border-dark-700/50 hover:border-dark-600'
       } ${draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
+      {/* Title row — checkbox + full-width title only */}
+      <div className="flex items-start gap-2 mb-2">
         {selectable && (
           <input
             type="checkbox"
@@ -115,10 +119,24 @@ export function TaskCard({
           />
         )}
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-dark-100 group-hover:text-accent leading-snug line-clamp-3">
+          <div className="text-sm font-medium text-dark-100 group-hover:text-accent leading-snug line-clamp-4">
             {task.title}
           </div>
         </div>
+      </div>
+
+      {/* Labels */}
+      {task.labelIds && task.labelIds.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {task.labelIds.map((id) => {
+            const l = labelsById?.get(id);
+            return <LabelPill key={id} size="xs" label={l || { labelId: id }} orphan={!l} />;
+          })}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+        {/* Priority badge — moved from title row */}
         {priority && (
           <span
             className={`shrink-0 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${priority.chip}`}
@@ -127,8 +145,9 @@ export function TaskCard({
             {priority.label}
           </span>
         )}
-        {/* Status Badge */}
-        {status && (
+
+        {/* Status badge — moved from title row */}
+        {status && !showStatusDropdown && !hideStatus && (
           <span
             className={`shrink-0 text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${statusStyle}`}
             title={`Status: ${statusLabel}`}
@@ -136,6 +155,7 @@ export function TaskCard({
             {statusLabel}
           </span>
         )}
+
         {/* Quick Status Change Dropdown (when on account page) */}
         {showStatusDropdown && onStatusChange && !selectable && (
           <select
@@ -156,19 +176,7 @@ export function TaskCard({
             <option value="not_applicable">N/A</option>
           </select>
         )}
-      </div>
 
-      {/* Labels */}
-      {task.labelIds && task.labelIds.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {task.labelIds.map((id) => {
-            const l = labelsById?.get(id);
-            return <LabelPill key={id} size="xs" label={l || { labelId: id }} orphan={!l} />;
-          })}
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
         {showAccount && task.accountName && (
           <span className="px-1.5 py-0.5 rounded bg-dark-700/80 text-dark-300 truncate max-w-[140px]">
             {task.accountName}
